@@ -178,6 +178,12 @@ export class CarController {
   private state: CarPhysicsState;
   private config: CarPhysicsConfig;
 
+  // Boost energy (0–1)
+  private _boostEnergy: number = 1.0;
+  private static readonly BOOST_REGEN_RATE = 0.12;  // per second
+  private static readonly BOOST_DRAIN_RATE = 0.45;  // per second
+  private static readonly BOOST_MIN_ENERGY = 0.1;   // minimum to activate
+
   // Mesh
   public rootNode: TransformNode;
   private bodyMesh: Mesh;
@@ -274,6 +280,21 @@ export class CarController {
 
     const curPos = new Vector3(this.state.pos.x, this.state.pos.y, this.state.pos.z);
 
+    // Manage boost energy
+    const wantsBoost = input.boost && this._boostEnergy >= CarController.BOOST_MIN_ENERGY;
+    const isBoosting = this.state.boostTimer > 0;
+
+    if (isBoosting) {
+      // Drain while boost effect is active
+      this._boostEnergy = Math.max(0, this._boostEnergy - CarController.BOOST_DRAIN_RATE * dt);
+    } else {
+      // Regen when not boosting
+      this._boostEnergy = Math.min(1, this._boostEnergy + CarController.BOOST_REGEN_RATE * dt);
+    }
+
+    // Only pass boost:true to physics if we have enough energy
+    const effectiveInput = { ...input, boost: wantsBoost };
+
     // Get ground height
     const groundY = this.track.getGroundY(curPos.x, curPos.z);
 
@@ -285,7 +306,7 @@ export class CarController {
     // Update physics
     const newState = updateCarPhysics(
       this.state,
-      input,
+      effectiveInput,
       dt,
       this.config,
       groundY,
@@ -346,6 +367,7 @@ export class CarController {
       yaw: this.track.spawnYaw,
       pos: { x: spawn.x, y: spawn.y, z: spawn.z },
     };
+    this._boostEnergy = 1.0;
     this.rootNode.position = new Vector3(spawn.x, spawn.y, spawn.z);
     this.rootNode.rotation.y = this.state.yaw;
   }
@@ -370,6 +392,10 @@ export class CarController {
 
   get isBoosting(): boolean {
     return this.state.boostTimer > 0;
+  }
+
+  get boostEnergy(): number {
+    return this._boostEnergy;
   }
 
   get isRespawning(): boolean {

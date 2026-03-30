@@ -5,6 +5,10 @@ export interface InputState {
   boost: boolean;   // one-shot: true only on first frame after press
 }
 
+export type InputScheme = "keyboard" | "gamepad" | "touch";
+
+const INPUT_SCHEME_KEY = "neondrift.inputScheme";
+
 export class InputManager {
   private pressedKeys = new Set<string>();
   private boostPressed = false;
@@ -12,10 +16,17 @@ export class InputManager {
   private gamepadBoostPressed = false;
   private gamepadBoostConsumed = false;
 
+  private _scheme: InputScheme;
+
   private onKeyDown: (e: KeyboardEvent) => void;
   private onKeyUp: (e: KeyboardEvent) => void;
 
   constructor() {
+    // Load persisted input scheme
+    const saved = typeof localStorage !== "undefined"
+      ? localStorage.getItem(INPUT_SCHEME_KEY)
+      : null;
+    this._scheme = (saved as InputScheme | null) ?? "keyboard";
     this.onKeyDown = (e: KeyboardEvent) => {
       this.pressedKeys.add(e.code);
       if (e.code === "Space") {
@@ -106,6 +117,17 @@ export class InputManager {
     }
 
     return { steer, throttle, brake, boost };
+  }
+
+  setScheme(scheme: InputScheme): void {
+    this._scheme = scheme;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(INPUT_SCHEME_KEY, scheme);
+    }
+  }
+
+  get scheme(): InputScheme {
+    return this._scheme;
   }
 
   destroy(): void {

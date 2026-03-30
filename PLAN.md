@@ -4,7 +4,7 @@
 
 ---
 
-**Version:** 1.1 | **Date:** 2026-03-30 | **Status:** Phase 0 Complete — Phase 1A In Progress
+**Version:** 1.1 | **Date:** 2026-03-30 | **Status:** Phase 1A Complete — Phase 1B Next
 
 ---
 
@@ -685,9 +685,9 @@ neondrift/
   - Lap counter (1/3, 2/3, 3/3)
   - Boost meter (fills over time, depletes on use)
   - Race position (placeholder — always shows "1st" until multiplayer)
-- [ ] Minimap: top-down SVG of track outline + car dot
-- [ ] Lap timing: start/finish line detection, per-lap time tracking
-- [ ] Race completion: 3 laps → results screen with times
+- [x] Minimap: top-down SVG of track outline + car dot
+- [x] Lap timing: start/finish line detection, per-lap time tracking
+- [x] Race completion: 3 laps → results screen with times
 
 **Physics tuning budget:** Reserve 2 days. Arcade physics that *feel* good (responsive, forgiving, satisfying drift) is the single most important factor for retention. Do not ship until test players say "this feels fun."
 

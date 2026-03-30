@@ -16,6 +16,8 @@ import { GameCamera } from "./camera.js";
 import { setupPostProcessing } from "./postprocess.js";
 import { InputManager } from "../input/InputManager.js";
 import { VirtualJoystick } from "../input/VirtualJoystick.js";
+import { LapTimer } from "./LapTimer.js";
+import { Minimap } from "./Minimap.js";
 
 export interface SceneSetupResult {
   engine: Engine;
@@ -88,6 +90,27 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
   // ── Car ───────────────────────────────────────────────────────────────────
   const car = new CarController(scene, track);
 
+  // ── Lap Timer ─────────────────────────────────────────────────────────────
+  let lapTimer = new LapTimer(3, track.segments.length);
+
+  lapTimer.onLapComplete = (lapNumber: number, _lapTimeMs: number) => {
+    const lapEl = document.getElementById("lap-indicator");
+    if (lapEl) {
+      lapEl.textContent = `Lap ${lapNumber + 1} / 3`;
+    }
+  };
+
+  lapTimer.onRaceComplete = (_totalTimeMs: number, lapTimesMs: number[]) => {
+    _showResults(lapTimesMs);
+  };
+
+  // ── Minimap ───────────────────────────────────────────────────────────────
+  const minimap = new Minimap(track.splinePoints);
+  const hudEl = document.getElementById("hud");
+  if (hudEl) {
+    minimap.mount(hudEl);
+  }
+
   // ── Input ─────────────────────────────────────────────────────────────────
   const input = new InputManager();
 
@@ -115,6 +138,14 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     }
   });
 
+  // Wire replay button
+  const replayBtn = document.getElementById("results-btn-replay");
+  if (replayBtn) {
+    replayBtn.addEventListener("click", () => {
+      window.location.reload();
+    });
+  }
+
   // ── Render loop / update ──────────────────────────────────────────────────
   scene.onBeforeRenderObservable.add(() => {
     const dt = engine.getDeltaTime() / 1000;
@@ -136,8 +167,12 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     track.update(dt);
     gameCamera.update(car.position, car.yaw);
 
+    // Update lap timer and minimap
+    lapTimer.update(track.getNearestSegmentIndex(car.position));
+    minimap.update(car.position);
+
     // Update HUD
-    _updateHUD(car.speed, car.isBoosting);
+    _updateHUD(car.speed, car.boostEnergy, lapTimer.currentLap, 3);
   });
 
   // ── Resize handler ────────────────────────────────────────────────────────
@@ -152,7 +187,7 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
 }
 
 // ─── HUD update ──────────────────────────────────────────────────────────────
-function _updateHUD(speed: number, isBoosting: boolean): void {
+function _updateHUD(speed: number, boostEnergy: number, currentLap: number, totalLaps: number): void {
   const speedEl = document.getElementById("speed-value");
   if (speedEl) {
     speedEl.textContent = Math.round(speed * 3.6).toString(); // m/s → km/h
@@ -160,11 +195,48 @@ function _updateHUD(speed: number, isBoosting: boolean): void {
 
   const boostBar = document.getElementById("boost-bar");
   if (boostBar) {
-    // Visual pulse when boosting
-    boostBar.style.width = isBoosting ? "100%" : "0%";
-    boostBar.style.background = isBoosting
+    boostBar.style.width = `${boostEnergy * 100}%`;
+    boostBar.style.background = boostEnergy > 0.5
       ? "linear-gradient(90deg, #00f5ff, #ff00aa)"
       : "rgba(0, 245, 255, 0.3)";
+  }
+
+  const lapEl = document.getElementById("lap-indicator");
+  if (lapEl) {
+    const lap = Math.min(currentLap, totalLaps);
+    lapEl.textContent = `Lap ${lap} / ${totalLaps}`;
+  }
+}
+
+// ─── Format lap time as "M:SS.mmm" ───────────────────────────────────────────
+function _formatTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const millis = Math.floor(ms % 1000);
+  const secStr = seconds.toString().padStart(2, "0");
+  const msStr = millis.toString().padStart(3, "0");
+  return `${minutes}:${secStr}.${msStr}`;
+}
+
+// ─── Show results screen ──────────────────────────────────────────────────────
+function _showResults(lapTimes: number[]): void {
+  const resultsScreen = document.getElementById("results-screen");
+  if (resultsScreen) {
+    resultsScreen.style.display = "flex";
+  }
+
+  const lapsEl = document.getElementById("results-laps");
+  if (lapsEl) {
+    lapsEl.innerHTML = lapTimes
+      .map((t, i) => `LAP ${i + 1} &nbsp; ${_formatTime(t)}`)
+      .join("<br>");
+  }
+
+  const totalMs = lapTimes.reduce((a, b) => a + b, 0);
+  const totalEl = document.getElementById("results-total");
+  if (totalEl) {
+    totalEl.textContent = `TOTAL  ${_formatTime(totalMs)}`;
   }
 }
 

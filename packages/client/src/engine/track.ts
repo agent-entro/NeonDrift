@@ -56,7 +56,7 @@ export interface TrackSegment {
 
 export class TrackSystem {
   private scene: Scene;
-  private splinePoints: Vector3[] = [];
+  private _splinePoints: Vector3[] = [];
   public segments: TrackSegment[] = [];
   public spawnPosition: Vector3 = new Vector3(0, 0.5, 0);
   public spawnYaw: number = 0;
@@ -76,11 +76,11 @@ export class TrackSystem {
 
     // Create smooth catmull-rom spline
     const spline = Curve3.CreateCatmullRomSpline(waypoints, 200, true);
-    this.splinePoints = spline.getPoints();
+    this._splinePoints = spline.getPoints();
 
     // Compute per-segment data
     this.segments = [];
-    const pts = this.splinePoints;
+    const pts = this._splinePoints;
     for (let i = 0; i < pts.length; i++) {
       const next = pts[(i + 1) % pts.length];
       const tangent = next.subtract(pts[i]).normalize();
@@ -100,13 +100,13 @@ export class TrackSystem {
     this.spawnYaw = 0;
 
     // Build road ribbon
-    this._buildRoad(pts);
+    this._buildRoad(this._splinePoints);
 
     // Build walls
-    this._buildWalls(pts);
+    this._buildWalls(this._splinePoints);
 
     // Build start line
-    this._buildStartLine(pts[0], pts[1]);
+    this._buildStartLine(this._splinePoints[0], this._splinePoints[1]);
   }
 
   private _buildRoad(pts: Vector3[]): void {
@@ -315,6 +315,16 @@ export class TrackSystem {
     const pos = new Vector3(x, 0, z);
     const idx = this._nearestSegmentIndex(pos);
     return this.segments[idx].groundY;
+  }
+
+  /** Public getter for spline points (used by Minimap) */
+  get splinePoints(): Vector3[] {
+    return this._splinePoints;
+  }
+
+  /** Public wrapper for nearest segment index (used by LapTimer) */
+  public getNearestSegmentIndex(pos: Vector3): number {
+    return this._nearestSegmentIndex(pos);
   }
 
   /**
