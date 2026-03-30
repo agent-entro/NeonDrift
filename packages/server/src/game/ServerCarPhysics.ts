@@ -1,0 +1,146 @@
+/**
+ * Server-side car physics — pure functions, no Babylon.js.
+ * Constants MUST match packages/client/src/engine/car.ts exactly.
+ */
+
+// ─── Physics constants (mirrored from client/src/engine/car.ts) ───────────────
+const TOP_SPEED = 35;           // m/s
+const BOOST_MULTIPLIER = 1.5;
+const BOOST_DURATION = 2000;    // ms
+const ACCELERATION = 20;        // m/s²
+const BRAKE_DECEL = 30;         // m/s²
+const NATURAL_DECEL = 8;        // m/s²
+const MAX_STEER_ANGLE = 1.2;    // radians/s yaw rate
+const LATERAL_FRICTION = 0.6;   // friction coefficient
+const GRAVITY = 18;             // m/s²
+const GROUND_Y = 0.5;           // world ground height
+
+export interface ServerCarState {
+  speed: number;
+  lateralVel: number;
+  verticalVel: number;
+  boostTimer: number;
+  yaw: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface ServerCarInput {
+  steering: number;  // -1 to +1
+  throttle: number;  // 0 to 1
+  brake: boolean;
+  boost: boolean;
+}
+
+/**
+ * Step server physics for one tick.
+ * @param state  Current car state (immutable)
+ * @param input  Player input for this tick
+ * @param dtMs   Delta time in milliseconds
+ * @returns      New car state after one physics step
+ */
+export function stepServerPhysics(
+  state: ServerCarState,
+  input: ServerCarInput,
+  dtMs: number,
+): ServerCarState {
+  const dt = dtMs / 1000; // convert to seconds
+
+  let { speed, lateralVel, verticalVel, boostTimer, yaw, x, y, z } = state;
+
+  // 1. Boost activation
+  if (input.boost && boostTimer <= 0) {
+    boostTimer = BOOST_DURATION;
+  }
+
+  // 2. Tick boostTimer
+  boostTimer = Math.max(0, boostTimer - dtMs);
+
+  // 3. Effective top speed
+  const effectiveTopSpeed = TOP_SPEED * (boostTimer > 0 ? BOOST_MULTIPLIER : 1);
+
+  // 4. Accelerate
+  if (input.throttle > 0) {
+    speed += ACCELERATION * input.throttle * dt;
+    if (speed > effectiveTopSpeed) speed = effectiveTopSpeed;
+  }
+
+  // 5. Brake
+  if (input.brake) {
+    speed -= BRAKE_DECEL * dt;
+    if (speed < 0) speed = 0;
+  }
+
+  // 6. Natural deceleration
+  if (input.throttle === 0 && !input.brake) {
+    speed = Math.max(0, speed - NATURAL_DECEL * dt);
+  }
+
+  // 7. Yaw rate scaled by speed
+  yaw += input.steering * MAX_STEER_ANGLE * (speed / TOP_SPEED) * dt;
+
+  // 8. Drift: lateral slip builds with throttle + steering
+  lateralVel += input.steering * speed * 0.15 * dt;
+
+  // 9. Lateral friction
+  lateralVel *= (1 - LATERAL_FRICTION * dt);
+
+  // 10. Compute heading vectors
+  const forwardX = Math.sin(yaw);
+  const forwardZ = Math.cos(yaw);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+
+  // 11. New position
+  let newX = x + forwardX * speed * dt + rightX * lateralVel * dt;
+  let newZ = z + forwardZ * speed * dt + rightZ * lateralVel * dt;
+  let newY = y;
+
+  // 12 & 13. Gravity / ground (flat ground at GROUND_Y)
+  const groundY = GROUND_Y;
+  const isAboveGround = newY > groundY + 0.5 + 0.01;
+  if (isAboveGround) {
+    verticalVel -= GRAVITY * dt;
+    newY += verticalVel * dt;
+    if (newY < groundY + 0.5) {
+      newY = groundY + 0.5;
+      verticalVel = 0;
+    }
+  } else {
+    verticalVel = 0;
+    newY = groundY + 0.5;
+  }
+
+  return {
+    speed,
+    lateralVel,
+    verticalVel,
+    boostTimer,
+    yaw,
+    x: newX,
+    y: newY,
+    z: newZ,
+  };
+}
+
+/**
+ * Create a default (stopped) car state at the given position.
+ */
+export function createDefaultCarState(
+  x = 0,
+  y = GROUND_Y + 0.5,
+  z = 0,
+  yaw = 0,
+): ServerCarState {
+  return {
+    speed: 0,
+    lateralVel: 0,
+    verticalVel: 0,
+    boostTimer: 0,
+    yaw,
+    x,
+    y,
+    z,
+  };
+}

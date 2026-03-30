@@ -6,6 +6,8 @@ import { mkdirSync } from "node:fs";
 import { Hono } from "hono";
 import { initDb } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
+import { RoomManager } from "./game/RoomManager.js";
+import { setupWsHandler } from "./game/WsHandler.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -17,15 +19,34 @@ mkdirSync(join(__dirname, "..", "data"), { recursive: true });
 const db = initDb(DB_PATH);
 runMigrations(db, MIGRATIONS_DIR);
 
+// ─── Room manager ─────────────────────────────────────────────────────────────
+const roomManager = new RoomManager();
+
 // ─── HTTP app ─────────────────────────────────────────────────────────────────
 const app = new Hono();
 app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
-app.get("/api/rooms", (c) => c.json({ rooms: [] }));
+app.get("/api/rooms", (c) => {
+  const rooms = roomManager.getActiveRooms().map((r) => ({
+    roomId: r.roomId,
+    trackId: r.trackId,
+    phase: r.getPhase(),
+    playerCount: r.getPlayerCount(),
+  }));
+  return c.json({ rooms });
+});
 app.post("/api/rooms", (c) => c.json({ error: "not_implemented" }, 501));
 app.get("/api/rooms/:slug", (c) => c.json({ error: "not_implemented" }, 501));
 app.post("/api/rooms/:slug/join", (c) => c.json({ error: "not_implemented" }, 501));
 app.post("/api/matchmaking/join", (c) => c.json({ error: "not_implemented" }, 501));
 app.delete("/api/matchmaking", (c) => c.json({ ok: true }));
+
+// Test room creation endpoint
+app.post("/api/rooms/create-test", async (c) => {
+  const { nanoid } = await import("nanoid");
+  const roomId = nanoid(10);
+  const room = roomManager.createRoom(roomId, "city-canyon", "test-host", 8);
+  return c.json({ roomId, wsUrl: `/ws?roomId=${roomId}` });
+});
 
 // ─── HTTP server ──────────────────────────────────────────────────────────────
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -54,15 +75,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
 // ─── WebSocket server ─────────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
-
-wss.on("connection", (socket, req) => {
-  console.log("[ws] client connected:", req.socket.remoteAddress);
-  socket.on("message", (data) => {
-    console.log("[ws] message, len:", data.toString().length);
-  });
-  socket.on("close", () => console.log("[ws] client disconnected"));
-  socket.on("error", (err) => console.error("[ws] error:", err.message));
-});
+setupWsHandler(wss, roomManager);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 httpServer.listen(PORT, () => {
@@ -72,6 +85,7 @@ httpServer.listen(PORT, () => {
 
 process.on("SIGINT", () => {
   console.log("\n[server] shutting down...");
+  roomManager.cleanup();
   wss.close();
   httpServer.close(() => { db.close(); process.exit(0); });
 });
