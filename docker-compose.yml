@@ -1,0 +1,29 @@
+version: "3.9"
+
+# Local dev: just the Node.js game server.
+# SQLite lives in a named volume — no separate DB container needed.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DB_PATH=/app/data/neondrift.db
+    volumes:
+      - neondrift_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  neondrift_data:
+    driver: local

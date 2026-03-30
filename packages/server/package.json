@@ -1,0 +1,28 @@
+{
+  "name": "@neondrift/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.11.1",
+    "hono": "^4.3.0",
+    "ws": "^8.17.0",
+    "better-sqlite3": "^12.8.0",
+    "msgpackr": "^1.10.1",
+    "nanoid": "^5.0.7",
+    "@neondrift/shared": "*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.12.0",
+    "tsx": "^4.9.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.5.0"
+  }
+}

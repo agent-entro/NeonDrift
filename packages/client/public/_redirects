@@ -1,0 +1,3 @@
+# Cloudflare Pages SPA routing — all paths serve index.html
+# Hash router handles client-side navigation
+/*    /index.html    200
