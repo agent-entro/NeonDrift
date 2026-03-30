@@ -697,7 +697,7 @@ neondrift/
 
 ---
 
-#### Phase 1B: Multiplayer Netcode (Days 9–14)
+#### [DONE] Phase 1B: Multiplayer Netcode (Days 9–14)
 
 **Goal:** 8 players race simultaneously with <100ms perceived latency. This is the hardest engineering challenge in the project.
 
