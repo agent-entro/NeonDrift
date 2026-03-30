@@ -4,7 +4,7 @@
 
 ---
 
-**Version:** 1.0 | **Date:** 2026-03-30 | **Status:** Draft
+**Version:** 1.1 | **Date:** 2026-03-30 | **Status:** Phase 0 Complete — Phase 1A In Progress
 
 ---
 
@@ -609,20 +609,20 @@ Everything not required to test that hypothesis is deferred.
 
 ### 4.2 Phased Implementation Plan
 
-#### Phase 0: Project Scaffolding (Days 1–3)
+#### Phase 0: Project Scaffolding (Days 1–3) ✓ COMPLETE
 
 **Goal:** Runnable dev environment with build pipeline, hot reload, and deploy target.
 
 **Deliverables:**
-- [ ] Monorepo structure: `packages/client`, `packages/server`, `packages/shared`
-- [ ] `packages/shared`: TypeScript types for all wire messages (MessagePack schemas), game constants, entity types
-- [ ] `packages/server`: Node.js + Hono HTTP + `ws` WebSocket, SQLite via `better-sqlite3`
-- [ ] `packages/client`: Vite 6 + Babylon.js 7 bootstrapped, empty 3D scene renders
-- [ ] Migration runner + initial SQL migrations (players, rooms, tracks, room_players)
-- [ ] Docker Compose for local dev (just the Node server — SQLite needs no container)
-- [ ] GitHub Actions CI: lint + type-check + test (Vitest)
-- [ ] Cloudflare Pages deploy for client, Fly.io deploy for server
-- [ ] Inline CSS spinner in `index.html` (no blank flash)
+- [x] Monorepo structure: `packages/client`, `packages/server`, `packages/shared`
+- [x] `packages/shared`: TypeScript types for all wire messages (MessagePack schemas), game constants, entity types
+- [x] `packages/server`: Node.js + Hono HTTP + `ws` WebSocket, SQLite via `better-sqlite3`
+- [x] `packages/client`: Vite 6 + Babylon.js 7 bootstrapped, empty 3D scene renders
+- [x] Migration runner + initial SQL migrations (players, rooms, tracks, room_players)
+- [x] Docker Compose for local dev (just the Node server — SQLite needs no container)
+- [x] GitHub Actions CI: lint + type-check + test (Vitest)
+- [x] Cloudflare Pages deploy for client, Fly.io deploy for server
+- [x] Inline CSS spinner in `index.html` (no blank flash)
 
 **Key files:**
 ```
