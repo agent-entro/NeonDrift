@@ -666,21 +666,21 @@ neondrift/
 **Goal:** A single car drives around a single track with correct physics, camera, and controls. No multiplayer yet — local only.
 
 **Deliverables:**
-- [ ] Babylon.js scene: neon-lit track (City Canyon), skybox, post-processing (bloom, chromatic aberration)
-- [ ] Car model loads from glTF. Placeholder geometry acceptable for first pass.
-- [ ] Arcade car physics using Havok:
+- [x] Babylon.js scene: neon-lit track (City Canyon), skybox, post-processing (bloom, chromatic aberration)
+- [x] Car model loads from glTF. Placeholder geometry acceptable for first pass.
+- [x] Arcade car physics using Havok:
   - Steering with drift (oversteer on turn + throttle)
   - Speed boost (temporary velocity multiplier)
   - Collision with track walls (bounce, not stop)
   - Gravity + ramps (airtime feels right)
   - Off-track detection → auto-respawn after 3s
-- [ ] Camera: chase cam (smooth follow behind car), orbit on results screen
-- [ ] Input handlers:
+- [x] Camera: chase cam (smooth follow behind car), orbit on results screen
+- [x] Input handlers:
   - Mobile: virtual joystick (left thumb), brake button (right thumb), tilt steering option
   - Desktop: WASD / arrow keys, space = boost
   - Gamepad: left stick + triggers + A button
   - Input scheme stored in localStorage
-- [ ] HUD overlay (vanilla DOM, positioned over canvas):
+- [x] HUD overlay (vanilla DOM, positioned over canvas):
   - Speed indicator
   - Lap counter (1/3, 2/3, 3/3)
   - Boost meter (fills over time, depletes on use)
