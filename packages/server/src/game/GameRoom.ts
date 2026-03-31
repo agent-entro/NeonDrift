@@ -5,6 +5,7 @@ import type {
   ServerMessage,
   InputMessage,
   PlayerGameState,
+  PlayerPositionDelta,
 } from "@neondrift/shared";
 import {
   TICK_MS,
@@ -22,6 +23,33 @@ import { stepServerPhysics, type ServerCarState } from "./ServerCarPhysics.js";
 import { createPlayerSession, type PlayerSession } from "./PlayerSession.js";
 
 export type RoomPhase = "lobby" | "countdown" | "racing" | "finished";
+
+// ─── Delta compression constants ─────────────────────────────────────────────
+/** Send a full snapshot every N ticks (20Hz × 3s = 60 ticks) */
+const FULL_SYNC_INTERVAL = 60;
+/** Position change threshold below which a player is omitted from the delta (meters) */
+const DELTA_POS_THRESHOLD = 0.005; // 0.5cm
+/** Yaw change threshold below which yaw is omitted (radians) */
+const DELTA_YAW_THRESHOLD = 0.001;
+/** Quantization: store positions as int16 at 1cm resolution */
+const POS_QUANTIZE = 100;
+/** Quantization: store yaw as int16 at 1/1000 radian resolution */
+const YAW_QUANTIZE = 1000;
+/** Quantization: store speed as int16 at 1/10 m/s resolution */
+const SPEED_QUANTIZE = 10;
+/** int16 range */
+const INT16_MIN = -32768;
+const INT16_MAX = 32767;
+
+/** Baseline state used to compute position deltas */
+interface PlayerBaseline {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  speed: number;
+  lap: number;
+}
 
 /** Number of laps per race (time-based placeholder) */
 const TOTAL_LAPS = 3;
@@ -56,6 +84,10 @@ export class GameRoom {
   private raceId: string = "";
   private onEmpty: () => void;
   private finishOrder: string[] = [];
+  /** Delta baseline: last position broadcast as a full snapshot per player */
+  private deltaBaselines: Map<string, PlayerBaseline> = new Map();
+  /** Tick number of last full sync */
+  private baselineTick: number = 0;
 
   constructor(
     roomId: string,
@@ -300,6 +332,8 @@ export class GameRoom {
     this.raceStartTime = Date.now();
     this.tick = 0;
     this.finishOrder = [];
+    this.deltaBaselines.clear();
+    this.baselineTick = 0;
 
     // Initialize lap start times for all players
     for (const session of this.players.values()) {
@@ -487,15 +521,18 @@ export class GameRoom {
   }
 
   private broadcastState(now: number): void {
-    const players: PlayerGameState[] = [];
+    const isFullSync = this.tick % FULL_SYNC_INTERVAL === 0;
+    const fullPlayers: PlayerGameState[] = [];
+    const deltaPlayers: PlayerPositionDelta[] = [];
 
     for (const session of this.players.values()) {
       if (session.isSpectator) continue;
 
       const state = session.carState;
       const vel = this.computeVelFromState(state);
+      const baseline = this.deltaBaselines.get(session.playerId);
 
-      players.push({
+      const fullState: PlayerGameState = {
         id: session.playerId,
         pos: { x: state.x, y: state.y, z: state.z },
         rot: yawToQuat(state.yaw),
@@ -504,15 +541,73 @@ export class GameRoom {
         powerup: session.activePowerup,
         finished: session.finished,
         finish_time_ms: session.finishTimeMs,
-      });
+      };
+
+      if (isFullSync || !baseline || session.finished) {
+        // Full snapshot: include complete state and update baseline
+        fullPlayers.push(fullState);
+        this.deltaBaselines.set(session.playerId, {
+          x: state.x,
+          y: state.y,
+          z: state.z,
+          yaw: state.yaw,
+          speed: state.speed,
+          lap: session.lap,
+        });
+      } else {
+        // Delta tick: check how much the player moved
+        const dx = state.x - baseline.x;
+        const dy = state.y - baseline.y;
+        const dz = state.z - baseline.z;
+        const dyaw = state.yaw - baseline.yaw;
+        const dspeed = state.speed - baseline.speed;
+
+        const posMoved =
+          Math.abs(dx) > DELTA_POS_THRESHOLD ||
+          Math.abs(dy) > DELTA_POS_THRESHOLD ||
+          Math.abs(dz) > DELTA_POS_THRESHOLD;
+        const yawChanged = Math.abs(dyaw) > DELTA_YAW_THRESHOLD;
+        const lapChanged = fullState.lap !== baseline.lap;
+
+        if (posMoved || yawChanged || lapChanged || fullState.powerup !== null) {
+          // Quantize to int16 (clamped)
+          const clamp16 = (v: number): number =>
+            Math.round(Math.max(INT16_MIN, Math.min(INT16_MAX, v)));
+
+          deltaPlayers.push({
+            id: session.playerId,
+            dx: clamp16(dx * POS_QUANTIZE),
+            dy: clamp16(dy * POS_QUANTIZE),
+            dz: clamp16(dz * POS_QUANTIZE),
+            dyaw: clamp16(dyaw * YAW_QUANTIZE),
+            speed: clamp16(state.speed * SPEED_QUANTIZE),
+          });
+
+          // Rebase when accumulated delta would overflow int16
+          const accDx = Math.abs(state.x - baseline.x) * POS_QUANTIZE;
+          const accDz = Math.abs(state.z - baseline.z) * POS_QUANTIZE;
+          if (accDx > INT16_MAX * 0.8 || accDz > INT16_MAX * 0.8) {
+            // Force full sync next tick by clearing baseline
+            this.deltaBaselines.delete(session.playerId);
+          }
+        }
+        // If not moved at all: omit this player from the message entirely
+      }
+    }
+
+    if (isFullSync) {
+      this.baselineTick = this.tick;
     }
 
     const msg: ServerMessage = {
       type: "state",
       tick: this.tick,
       server_time: now,
-      players,
-      powerups: [], // No powerup spawns in Phase 1B
+      players: fullPlayers,
+      deltas: deltaPlayers,
+      powerups: [],
+      is_full_sync: isFullSync,
+      baseline_tick: this.baselineTick,
     };
 
     this.broadcast(msg);

@@ -91,14 +91,49 @@ export interface RoomStateMessage {
   host_player_id: string;
 }
 
+/**
+ * Quantized position delta for a single player.
+ * dx/dy/dz are int16 values representing the change in position
+ * at 0.01m (1cm) precision since the last full snapshot.
+ * Used to reduce bandwidth when players haven't moved far.
+ */
+export interface PlayerPositionDelta {
+  id: string;
+  /** dx from baseline position × 100, clamped to int16 range */
+  dx: number;
+  dy: number;
+  dz: number;
+  /** Yaw change × 1000 radians, clamped to int16 range */
+  dyaw: number;
+  /** Current speed (m/s × 10, int16) */
+  speed: number;
+}
+
 /** Authoritative game state tick (20Hz during race) */
 export interface StateMessage {
   type: "state";
   tick: number;
   /** Server timestamp for lag compensation */
   server_time: number;
+  /**
+   * Full state for players added/changed since last full sync.
+   * Always populated on full-sync ticks (is_full_sync=true).
+   */
   players: PlayerGameState[];
+  /**
+   * Position-only deltas for players who only moved slightly.
+   * Client applies these on top of the last known full state.
+   */
+  deltas: PlayerPositionDelta[];
   powerups: PowerupSpawn[];
+  /**
+   * When true, `players` contains ALL players (not just changed ones).
+   * Clients should replace their entire player state cache.
+   * Sent every FULL_SYNC_INTERVAL ticks and on reconnect.
+   */
+  is_full_sync: boolean;
+  /** The tick number of the last full sync baseline */
+  baseline_tick: number;
 }
 
 export type GameEventKind =
