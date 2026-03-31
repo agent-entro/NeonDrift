@@ -92,8 +92,9 @@ export class RaceNetwork {
     }
 
     // Prune stale ghosts on full sync
+    let activeIds: Set<string> | undefined;
     if (stateMsg.is_full_sync) {
-      const activeIds = new Set(stateMsg.players.map((p) => p.id));
+      activeIds = new Set(stateMsg.players.map((p) => p.id));
       for (const [id, ghost] of this.ghosts) {
         if (!activeIds.has(id)) {
           ghost.dispose();
@@ -104,11 +105,11 @@ export class RaceNetwork {
       }
     }
 
-    // Feed into interpolation buffer
+    // Always add a snapshot — even when allStates is empty — so the
+    // interpolation buffer stays current and idle players (absent from
+    // delta ticks) remain visible via lastKnown state.
     const allStates = [...stateMsg.players, ...deltaStates];
-    if (allStates.length > 0) {
-      this.interpolation.addSnapshot(stateMsg.server_time, allStates);
-    }
+    this.interpolation.addSnapshot(stateMsg.server_time, allStates, activeIds);
   }
 
   /**

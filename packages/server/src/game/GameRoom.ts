@@ -587,19 +587,17 @@ export class GameRoom {
             speed: clamp16(state.speed * SPEED_QUANTIZE),
           });
 
-          // *** CRITICAL: advance the baseline to the current position so the
-          // next delta is computed relative to THIS tick, not the original full
-          // sync. The client applies each delta on top of its own incrementally-
-          // updated baseline, so both sides must share the same reference point.
-          // Failing to do this causes ghost positions to diverge exponentially
-          // within the first few ticks (each delta grows by the full displacement
-          // from the full-sync point, but the client stacks them additively).
+          // Advance the baseline to the QUANTIZED position the client will
+          // reconstruct. Both sides must share the exact same reference point.
+          // Using exact floats here while the client stores rounded values
+          // causes per-tick rounding error to accumulate (up to ~0.3 m over
+          // 60 ticks before the next full sync resets the baseline).
           this.deltaBaselines.set(session.playerId, {
-            x: state.x,
-            y: state.y,
-            z: state.z,
-            yaw: state.yaw,
-            speed: state.speed,
+            x: Math.round(state.x * POS_QUANTIZE) / POS_QUANTIZE,
+            y: Math.round(state.y * POS_QUANTIZE) / POS_QUANTIZE,
+            z: Math.round(state.z * POS_QUANTIZE) / POS_QUANTIZE,
+            yaw: Math.round(state.yaw * YAW_QUANTIZE) / YAW_QUANTIZE,
+            speed: Math.round(state.speed * SPEED_QUANTIZE) / SPEED_QUANTIZE,
             lap: session.lap,
           });
         }
