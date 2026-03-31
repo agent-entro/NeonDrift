@@ -270,7 +270,7 @@ export class CarController {
 
     // Position root node at spawn
     this.rootNode.position = new Vector3(spawn.x, spawn.y, spawn.z);
-    this.rootNode.rotation.y = this.state.yaw;
+    this.rootNode.rotation.y = -this.state.yaw;
   }
 
   update(dt: number, input: CarPhysicsInput): void {
@@ -353,7 +353,7 @@ export class CarController {
     this.rootNode.position.x = this.state.pos.x;
     this.rootNode.position.y = this.state.pos.y;
     this.rootNode.position.z = this.state.pos.z;
-    this.rootNode.rotation.y = this.state.yaw;
+    this.rootNode.rotation.y = -this.state.yaw;
 
     // Animate wheels: rotate around the rolling (X) axis.
     // Each wheel has rotation.z = π/2 which tilts the cylinder into wheel
@@ -395,7 +395,7 @@ export class CarController {
     };
     this._boostEnergy = 1.0;
     this.rootNode.position = new Vector3(spawn.x, spawn.y, spawn.z);
-    this.rootNode.rotation.y = this.state.yaw;
+    this.rootNode.rotation.y = -this.state.yaw;
   }
 
   activateBoost(): void {
