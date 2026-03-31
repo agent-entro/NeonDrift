@@ -18,7 +18,12 @@ const NATURAL_DECEL = 8;        // m/s²
 const MAX_STEER_ANGLE = 1.6;    // rad/s — MUST match client (was 1.2: caused 2.7× turning divergence)
 const LATERAL_FRICTION = 0.6;   // friction coefficient
 const GRAVITY = 18;             // m/s²
-const GROUND_Y = 0.5;           // world ground height
+// GROUND_Y = 0 matches the client's flat-section track segments (RAW_WAYPOINTS y=0).
+// The car body half-height offset of 0.5 is applied on top in both server and client,
+// producing a grounded car at y=0.5.  The old value of 0.5 put the server at y=1.0
+// while the client sat at y=0.5 — a permanent 0.5 m vertical desync visible as all
+// ghost cars floating above the road surface.
+const GROUND_Y = 0;             // world flat-section ground height — MUST stay 0
 
 export interface ServerCarState {
   speed: number;
@@ -40,15 +45,20 @@ export interface ServerCarInput {
 
 /**
  * Step server physics for one tick.
- * @param state  Current car state (immutable)
- * @param input  Player input for this tick
- * @param dtMs   Delta time in milliseconds
- * @returns      New car state after one physics step
+ * @param state          Current car state (immutable)
+ * @param input          Player input for this tick
+ * @param dtMs           Delta time in milliseconds
+ * @param terrainGroundY Optional terrain Y at the car's current XZ position.
+ *                       Provided by GameRoom after a getTerrainGroundY() call so
+ *                       the server correctly handles the ramp section (up to y=8).
+ *                       Defaults to GROUND_Y (0) for flat sections.
+ * @returns              New car state after one physics step
  */
 export function stepServerPhysics(
   state: ServerCarState,
   input: ServerCarInput,
   dtMs: number,
+  terrainGroundY = GROUND_Y,
 ): ServerCarState {
   const dt = dtMs / 1000; // convert to seconds
 
@@ -106,8 +116,11 @@ export function stepServerPhysics(
   let newZ = z + forwardZ * speed * dt + rightZ * lateralVel * dt;
   let newY = y;
 
-  // 12 & 13. Gravity / ground (flat ground at GROUND_Y)
-  const groundY = GROUND_Y;
+  // 12 & 13. Gravity / ground
+  // Use caller-supplied terrainGroundY so ramp sections work correctly.
+  // On flat parts terrainGroundY === GROUND_Y === 0.  On the ramp it can be
+  // up to 8 m, matching the client's track.getGroundY() result.
+  const groundY = terrainGroundY;
   const isAboveGround = newY > groundY + 0.5 + 0.01;
   if (isAboveGround) {
     verticalVel -= GRAVITY * dt;

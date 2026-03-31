@@ -400,8 +400,11 @@ async function showLobbyWithSession(
           if (srvState && sceneResult) {
             const car = sceneResult.car;
             const dx = srvState.pos.x - car.position.x;
+            const dy = srvState.pos.y - car.position.y;
             const dz = srvState.pos.z - car.position.z;
-            const divergence = Math.sqrt(dx * dx + dz * dz);
+            // Include Y in divergence so a vertical offset (e.g. on the ramp)
+            // triggers correction even when XZ is within tolerance.
+            const divergence = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
             if (divergence > 0.3) {
               const srvYaw = 2 * Math.atan2(srvState.rot.y, srvState.rot.w);
@@ -437,6 +440,23 @@ async function showLobbyWithSession(
             const rttEst = Math.round(-d.serverTimeOffset * 2);
             const bufHealth = d.bufferSize >= 3 ? "OK" : d.bufferSize >= 1 ? "LOW" : "EMPTY";
 
+            // Y-specific diagnostics — key for debugging vertical desync
+            const carY = sceneResult?.car?.position?.y ?? null;
+            const srvY = srvSt?.pos?.y ?? null;
+            const yDelta = carY !== null && srvY !== null
+              ? (srvY - carY).toFixed(3)
+              : "—";
+            const yLocal = carY !== null ? carY.toFixed(3) : "—";
+            const yServer = srvY !== null ? srvY.toFixed(3) : "—";
+
+            // XZ-specific divergence breakdown
+            const xzDiv = (() => {
+              if (!sceneResult?.car || !srvSt) return "—";
+              const ddx = srvSt.pos.x - sceneResult.car.position.x;
+              const ddz = srvSt.pos.z - sceneResult.car.position.z;
+              return `${ddx.toFixed(2)},${ddz.toFixed(2)}`;
+            })();
+
             debugOverlay.textContent = [
               `── NeonDrift Debug (F3) ──`,
               `Server tick   ${d.latestServerTick}`,
@@ -446,7 +466,12 @@ async function showLobbyWithSession(
               `Players       ${d.trackedPlayers}`,
               `Buffer        ${d.bufferSize} snaps [${bufHealth}]`,
               `──────────────────────────`,
-              `Srv diverge   ${divText}`,
+              `XZ diverge    ${divText}`,
+              `XZ delta      (${xzDiv})`,
+              `──── Y (vertical) ────────`,
+              `Y local       ${yLocal} m`,
+              `Y server      ${yServer} m`,
+              `Y delta       ${yDelta} m  ← should be ~0`,
               `──────────────────────────`,
               `F3 — hide`,
             ].join("\n");

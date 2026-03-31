@@ -48,7 +48,7 @@ function slotToSpawnPos(slot: number): { x: number; y: number; z: number; yaw: n
   const row = Math.floor(slot / 2);
   return {
     x: column === 0 ? -2.5 : 2.5,
-    y: 1.0,   // GROUND_Y (0.5) + half-height (0.5)
+    y: 0.5,   // GROUND_Y (0) + car half-height (0.5) — matches client spawn y
     z: -row * 6,
     yaw: 0,
   };

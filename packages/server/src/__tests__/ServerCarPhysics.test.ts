@@ -30,8 +30,10 @@ describe("ServerCarPhysics", () => {
     expect(state.yaw).toBe(0);
     expect(state.x).toBe(0);
     expect(state.z).toBe(0);
-    // y should be GROUND_Y + 0.5 = 1.0
-    expect(state.y).toBe(1.0);
+    // y should be GROUND_Y (0) + car half-height (0.5) = 0.5
+    // GROUND_Y was corrected from 0.5 → 0 to match the client's flat-section
+    // track segments (RAW_WAYPOINTS y = 0), eliminating the 0.5 m vertical desync.
+    expect(state.y).toBe(0.5);
   });
 
   it("creates a default car state at a given position", () => {
@@ -198,12 +200,12 @@ describe("ServerCarPhysics", () => {
     expect(state.speed).toBeLessThan(speedAfterAccel);
   });
 
-  it("car stays on ground (y = 1.0) when on flat ground", () => {
+  it("car stays on ground (y = 0.5) when on flat ground", () => {
     let state = createDefaultCarState();
     for (let i = 0; i < 20; i++) {
       state = stepServerPhysics(state, throttleInput(1), TICK_MS);
     }
-    // Y should stay at GROUND_Y + 0.5 = 1.0
-    expect(state.y).toBe(1.0);
+    // Y should stay at GROUND_Y (0) + car half-height (0.5) = 0.5
+    expect(state.y).toBe(0.5);
   });
 });

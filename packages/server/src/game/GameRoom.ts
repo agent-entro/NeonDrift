@@ -17,6 +17,7 @@ import {
   computeNearestWaypointIdx,
   RENDERED_TRACK_WAYPOINT_COUNT,
   computeServerWallResponse,
+  getTerrainGroundY,
 } from "@neondrift/shared";
 
 /** Operator-tunable reconnect grace period via env var; falls back to shared default (10s) */
@@ -389,6 +390,10 @@ export class GameRoom {
         ? now - session.disconnectedAt
         : 0;
 
+      // Terrain-aware ground Y so the server car follows the ramp section.
+      // Equivalent to client's track.getGroundY(x, z).
+      const terrainY = getTerrainGroundY(session.carState.x, session.carState.z);
+
       // Step with zero input for disconnected players within grace window
       if (isDisconnected) {
         if (disconnectedElapsed <= RECONNECT_GRACE_MS) {
@@ -397,11 +402,12 @@ export class GameRoom {
             session.carState,
             { steering: 0, throttle: 0, brake: false, boost: false },
             TICK_MS,
+            terrainY,
           );
         }
         // After grace period: stop updating (car stays in place)
       } else {
-        session.carState = stepServerPhysics(session.carState, session.lastInput, TICK_MS);
+        session.carState = stepServerPhysics(session.carState, session.lastInput, TICK_MS, terrainY);
       }
 
       // ── Authoritative wall collision ─────────────────────────────────────
