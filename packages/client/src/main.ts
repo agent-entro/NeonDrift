@@ -27,6 +27,11 @@ const uiRoot = document.createElement("div");
 uiRoot.id = "nd-ui-root";
 document.body.appendChild(uiRoot);
 
+// ── API base URL ─────────────────────────────────────────────────────────────
+// Derived from Vite's `base` config so requests are routed correctly through
+// the dev proxy (/neon/api → :3001/api) and production reverse proxy.
+const API_BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+
 // ── Session storage key ───────────────────────────────────────────────────────
 const SESSION_KEY = "nd_session";
 
@@ -146,7 +151,7 @@ function promptNameAndJoin(
     joinBtn.textContent = "Joining…";
 
     try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(slug)}/join`, {
+      const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(slug)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ displayName }),
@@ -263,7 +268,7 @@ async function showLobbyWithSession(
   };
 
   try {
-    const res = await fetch(`/api/rooms/${encodeURIComponent(slug)}`);
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(slug)}`);
     if (!res.ok) {
       throw new Error(`Room not found (${res.status})`);
     }

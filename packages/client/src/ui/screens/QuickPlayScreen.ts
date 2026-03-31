@@ -1,5 +1,9 @@
 // ─── Quick Play / Matchmaking Screen ─────────────────────────────────────────
 
+// Respect Vite's `base` config so API requests are routed correctly through
+// the dev proxy (and behind a reverse proxy in production).
+const API_BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+
 const QP_STYLE_ID = "nd-quickplay-styles";
 
 function injectQPStyles(): void {
@@ -248,7 +252,7 @@ export function mountQuickPlay(
 
       try {
         const res = await fetch(
-          `/api/matchmaking/status?sessionToken=${encodeURIComponent(token)}`,
+          `${API_BASE}/api/matchmaking/status?sessionToken=${encodeURIComponent(token)}`,
         );
 
         if (!res.ok) {
@@ -302,7 +306,7 @@ export function mountQuickPlay(
     phase = "queued";
 
     try {
-      const res = await fetch("/api/matchmaking/join", {
+      const res = await fetch(`${API_BASE}/api/matchmaking/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ displayName }),
@@ -340,7 +344,7 @@ export function mountQuickPlay(
 
     if (sessionToken && phase === "queued") {
       try {
-        await fetch("/api/matchmaking", {
+        await fetch(`${API_BASE}/api/matchmaking`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionToken }),

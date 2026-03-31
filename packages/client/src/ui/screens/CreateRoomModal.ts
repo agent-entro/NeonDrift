@@ -1,5 +1,9 @@
 // ─── Create Room Modal ────────────────────────────────────────────────────────
 
+// Respect Vite's `base` config so API requests are routed correctly through
+// the dev proxy (and behind a reverse proxy in production).
+const API_BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+
 const MODAL_STYLE_ID = "nd-modal-styles";
 
 function injectModalStyles(): void {
@@ -230,7 +234,7 @@ export function mountCreateRoomModal(
     createBtn.textContent = "Creating…";
 
     try {
-      const res = await fetch("/api/rooms", {
+      const res = await fetch(`${API_BASE}/api/rooms`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ displayName, trackId }),

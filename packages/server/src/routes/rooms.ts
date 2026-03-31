@@ -121,6 +121,7 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
     const playerCount = liveRoom ? liveRoom.getPlayerCount() : 0;
 
     return c.json({
+      roomId: row.id,
       slug: row.slug,
       trackId: row.track_id,
       status: row.status,
