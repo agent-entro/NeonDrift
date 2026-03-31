@@ -6,7 +6,7 @@ export type RaceStatus = "countdown" | "active" | "finished";
 export type CosmeticType = "decal" | "trail" | "horn" | "body" | "emote";
 export type ClanRole = "leader" | "officer" | "member";
 export type TrackDifficulty = "easy" | "medium" | "hard";
-export type PowerupKind = "boost" | "shield" | "emp";
+export type PowerupKind = "boost" | "shield" | "emp" | "gravity_well" | "time_warp";
 
 export interface Player {
   id: string;

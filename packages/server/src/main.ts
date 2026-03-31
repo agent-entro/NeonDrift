@@ -10,6 +10,8 @@ import { RoomManager } from "./game/RoomManager.js";
 import { setupWsHandler } from "./game/WsHandler.js";
 import { roomsRouter } from "./routes/rooms.js";
 import { matchmakingRouter } from "./routes/matchmaking.js";
+import { replaysRouter } from "./routes/replays.js";
+import { rateLimit } from "./middleware/rateLimit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -57,12 +59,19 @@ app.get("/api/rooms", (c) => {
   return c.json({ rooms });
 });
 
-// Mount room and matchmaking routers
+// Rate limiting for mutation endpoints
+app.use("/api/rooms", rateLimit({ windowMs: 60_000, max: 20 }));
+app.use("/api/rooms/*", rateLimit({ windowMs: 60_000, max: 30 }));
+app.use("/api/matchmaking/*", rateLimit({ windowMs: 60_000, max: 10 }));
+
+// Mount room, matchmaking, and replay routers
 const rooms = roomsRouter(roomManager, db);
 const matchmaking = matchmakingRouter(roomManager, db);
+const replays = replaysRouter();
 
 app.route("/", rooms);
 app.route("/", matchmaking);
+app.route("/", replays);
 
 // Test room creation endpoint (kept for backwards compatibility)
 app.post("/api/rooms/create-test", async (c) => {

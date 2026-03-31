@@ -690,11 +690,11 @@ neondrift/
 - [x] Spectator mode (read-only WS connection, camera follows leader)
 
 **Milestone 1.4 — Power-ups, Polish & Replay**
-- [ ] 5 power-ups: Speed Boost, Shield, EMP Pulse, Gravity Well, Time Warp (server-authoritative)
-- [ ] 3 fully built tracks: City Canyon, Orbital Loop, Crystal Caverns
-- [ ] Full audio: engine hum, drift screech, boost, power-up SFX, countdown, fanfare
-- [ ] Post-race results screen with XP animation, race-again, and replay share
-- [ ] Replay system: tick-recorded binary, R2 upload (7-day TTL), `/watch/:replayId` playback
+- [x] 5 power-ups: Speed Boost, Shield, EMP Pulse, Gravity Well, Time Warp (server-authoritative)
+- [x] 3 fully built tracks: City Canyon, Orbital Loop, Crystal Caverns
+- [x] Full audio: engine hum, drift screech, boost, power-up SFX, countdown, fanfare
+- [x] Post-race results screen with XP animation, race-again, and replay share
+- [x] Replay system: tick-recorded binary, R2 upload (7-day TTL), `/watch/:replayId` playback
 - [ ] Mobile optimization: LOD, texture atlas, 30fps target on mid-range Android
 - [ ] Progressive loading: <2MB initial bundle, lazy track assets with progress bar
 
