@@ -587,19 +587,21 @@ export class GameRoom {
             speed: clamp16(state.speed * SPEED_QUANTIZE),
           });
 
-          // Advance the baseline to the QUANTIZED position the client will
-          // reconstruct. Both sides must share the exact same reference point.
-          // Using exact floats here while the client stores rounded values
-          // causes per-tick rounding error to accumulate (up to ~0.3 m over
-          // 60 ticks before the next full sync resets the baseline).
-          this.deltaBaselines.set(session.playerId, {
-            x: Math.round(state.x * POS_QUANTIZE) / POS_QUANTIZE,
-            y: Math.round(state.y * POS_QUANTIZE) / POS_QUANTIZE,
-            z: Math.round(state.z * POS_QUANTIZE) / POS_QUANTIZE,
-            yaw: Math.round(state.yaw * YAW_QUANTIZE) / YAW_QUANTIZE,
-            speed: Math.round(state.speed * SPEED_QUANTIZE) / SPEED_QUANTIZE,
-            lap: session.lap,
-          });
+          // DO NOT advance the baseline here. Deltas are always computed
+          // relative to the last FULL-SYNC baseline, not the previous delta.
+          // The client's baselines map is only updated on full-sync ticks, so
+          // both sides must use the same fixed reference. Advancing the baseline
+          // here while the client uses a fixed one causes error to accumulate
+          // at ~speed×TICK_MS per tick (≈1.5 m/tick at 35 m/s → ~90 m after 3s).
+
+          // Rebase when accumulated delta would overflow int16 (>262m from baseline)
+          const accDx = Math.abs(dx) * POS_QUANTIZE;
+          const accDz = Math.abs(dz) * POS_QUANTIZE;
+          if (accDx > INT16_MAX * 0.8 || accDz > INT16_MAX * 0.8) {
+            // Clear baseline → player falls into the !baseline branch next tick
+            // and is sent as a full snapshot, resetting both sides.
+            this.deltaBaselines.delete(session.playerId);
+          }
         }
         // If not moved at all: omit this player from the delta; baseline is
         // unchanged so the next active tick computes the correct cumulative diff.

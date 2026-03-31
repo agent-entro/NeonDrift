@@ -24,8 +24,12 @@ export class RemoteInterpolation {
    */
   private lastKnown = new Map<string, PlayerGameState>();
 
-  /** Render this many ms behind the latest received state */
-  private readonly BUFFER_TIME_MS = 100;
+  /**
+   * Render this many ms behind the latest received state.
+   * 150 ms = 3 ticks at 20 Hz — enough cushion to absorb single-packet jitter
+   * without falling into the no-after-snapshot extrapolation path.
+   */
+  private readonly BUFFER_TIME_MS = 150;
 
   /**
    * Keep 30 snapshots — at 20 Hz that's 1.5 s of history.
@@ -173,6 +177,19 @@ export class RemoteInterpolation {
       finished: b.finished,
       finish_time_ms: b.finish_time_ms,
     };
+  }
+
+  /** Returns the number of snapshots currently in the buffer. */
+  getBufferSize(): number {
+    return this.buffer.length;
+  }
+
+  /**
+   * Returns the render timestamp (in server-clock ms) that getInterpolated()
+   * would use right now. Useful for debug overlays.
+   */
+  getDebugRenderTime(clientNow: number, serverTimeOffset: number): number {
+    return clientNow + serverTimeOffset - this.BUFFER_TIME_MS;
   }
 
   private lerpVec3(

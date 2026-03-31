@@ -23,6 +23,36 @@ const loadingScreen = document.getElementById("loading-screen")!;
 const loadingStatus = document.getElementById("loading-status")!;
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 
+// ── Debug overlay (F3 to toggle) ──────────────────────────────────────────────
+const debugOverlay = document.createElement("div");
+debugOverlay.id = "nd-debug";
+debugOverlay.style.cssText = [
+  "display:none",
+  "position:fixed",
+  "bottom:70px",
+  "left:16px",
+  "z-index:200",
+  "font-family:'Courier New',monospace",
+  "font-size:0.65rem",
+  "color:rgba(0,245,255,0.9)",
+  "background:rgba(0,0,20,0.8)",
+  "border:1px solid rgba(0,245,255,0.3)",
+  "border-radius:4px",
+  "padding:8px 12px",
+  "line-height:1.7",
+  "pointer-events:none",
+  "white-space:pre",
+].join(";");
+document.body.appendChild(debugOverlay);
+let debugVisible = false;
+window.addEventListener("keydown", (e) => {
+  if (e.key === "F3") {
+    e.preventDefault();
+    debugVisible = !debugVisible;
+    debugOverlay.style.display = debugVisible ? "block" : "none";
+  }
+});
+
 // Container for UI overlays — everything is appended here
 const uiRoot = document.createElement("div");
 uiRoot.id = "nd-ui-root";
@@ -350,8 +380,31 @@ async function showLobbyWithSession(
           session.playerId,
           sceneResult.minimap,
         );
+        const racePositionEl = document.getElementById("race-position");
+        const ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"];
+
         sceneResult.registerNetworkTick((input, tick) => {
           raceNet.tick(input, tick);
+
+          // Update race position display using server-authoritative lap data
+          if (racePositionEl) {
+            const pos = raceNet.getLocalRacePosition();
+            racePositionEl.textContent = ORDINALS[pos - 1] ?? `${pos}th`;
+          }
+
+          // Update debug overlay (only paid when visible)
+          if (debugVisible) {
+            const d = raceNet.getDebugInfo();
+            debugOverlay.textContent = [
+              `SERVER TICK   ${d.latestServerTick}`,
+              `CLIENT NOW    ${Date.now()}`,
+              `RENDER TIME   ${d.renderTime}`,
+              `SRV OFFSET    ${d.serverTimeOffset > 0 ? "+" : ""}${d.serverTimeOffset} ms`,
+              `PLAYERS       ${d.trackedPlayers}`,
+              `BUFFER        ${d.bufferSize} snaps`,
+              `F3 — hide debug`,
+            ].join("\n");
+          }
         });
 
         // Store cleanup so navigating away disposes ghosts + unsubscribes

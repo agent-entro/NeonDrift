@@ -31,8 +31,8 @@ describe("RemoteInterpolation", () => {
     const t = 1000;
     interp.addSnapshot(t, [makeState("p1", 0, 0)]);
 
-    // With serverTimeOffset=0, render time = clientNow - 100ms
-    // If clientNow = 1200, render time = 1200 - 100 = 1100 > t=1000 => use t=1000
+    // With serverTimeOffset=0, render time = clientNow - 150ms
+    // If clientNow = 1200, render time = 1200 - 150 = 1050 > t=1000 => use t=1000
     const result = interp.getInterpolated(1200, 0);
     expect(result.has("p1")).toBe(true);
     expect(result.get("p1")!.pos.x).toBe(0);
@@ -46,9 +46,9 @@ describe("RemoteInterpolation", () => {
     interp.addSnapshot(t2, [makeState("p1", 10, 0)]);
 
     // Render at time t1 + 25ms = 1025 (halfway between t1 and t2)
-    // clientNow + serverTimeOffset - 100 = 1025
-    // => clientNow = 1025 - serverTimeOffset + 100 = 1125 (with offset=0)
-    const result = interp.getInterpolated(1125, 0);
+    // clientNow + serverTimeOffset - 150 = 1025
+    // => clientNow = 1025 - serverTimeOffset + 150 = 1175 (with offset=0)
+    const result = interp.getInterpolated(1175, 0);
 
     const p1 = result.get("p1");
     expect(p1).toBeDefined();
@@ -108,7 +108,8 @@ describe("RemoteInterpolation", () => {
     interp.addSnapshot(t1, [makeState("p2", 0, 0)]);
     interp.addSnapshot(t2, [makeState("p1", 10, 10), makeState("p2", 5, 0)]);
 
-    const result = interp.getInterpolated(1125, 0);
+    // clientNow + 0 - 150 = 1025 => clientNow = 1175
+    const result = interp.getInterpolated(1175, 0);
 
     // p1 not in t1, should use t2 directly
     expect(result.has("p1")).toBe(true);
@@ -121,6 +122,7 @@ describe("RemoteInterpolation", () => {
   it("lerps velocity along with position", () => {
     const t1 = 1000;
     const t2 = 1050;
+    // clientNow such that renderTime = 1025 (midpoint): clientNow = 1025 + 150 = 1175
 
     const s1: PlayerGameState = {
       id: "p1",
@@ -146,8 +148,8 @@ describe("RemoteInterpolation", () => {
     interp.addSnapshot(t1, [s1]);
     interp.addSnapshot(t2, [s2]);
 
-    // Render at midpoint
-    const result = interp.getInterpolated(1125, 0);
+    // Render at midpoint: clientNow = 1175, renderTime = 1175 + 0 - 150 = 1025
+    const result = interp.getInterpolated(1175, 0);
     const p1 = result.get("p1")!;
 
     // Velocity should be interpolated
@@ -162,8 +164,8 @@ describe("RemoteInterpolation", () => {
     interp.addSnapshot(1050, [makeState("p1", 10, 0)]);
 
     // Render at midpoint between 1000 and 1050 (renderTime = 1025)
-    // clientNow + 0 - 100 = 1025 => clientNow = 1125
-    const result = interp.getInterpolated(1125, 0);
+    // clientNow + 0 - 150 = 1025 => clientNow = 1175
+    const result = interp.getInterpolated(1175, 0);
     const p1 = result.get("p1")!;
 
     // Should interpolate between x=0 (t=1000) and x=10 (t=1050) at t=0.5
@@ -175,9 +177,9 @@ describe("RemoteInterpolation", () => {
     interp.addSnapshot(t, [makeState("p1", 5, 5)]);
 
     // With a positive offset (server is 200ms ahead of client)
-    // renderTime = clientNow + 200 - 100 = clientNow + 100
-    // If clientNow = 900, renderTime = 1000 => exactly at t
-    const result = interp.getInterpolated(900, 200);
+    // renderTime = clientNow + 200 - 150 = clientNow + 50
+    // If clientNow = 950, renderTime = 1000 => exactly at t
+    const result = interp.getInterpolated(950, 200);
     expect(result.has("p1")).toBe(true);
   });
 });

@@ -70,6 +70,8 @@ export class RaceNetwork {
   private serverTimeOffsetInitialized = false;
   private static readonly CLOCK_EMA_ALPHA = 0.05;
 
+  private _lastServerTick = 0;
+
   private readonly unsub: () => void;
 
   constructor(
@@ -85,6 +87,8 @@ export class RaceNetwork {
   private handleMessage(msg: ServerMessage): void {
     if (msg.type !== "state") return;
     const stateMsg = msg as StateMessage;
+
+    this._lastServerTick = stateMsg.tick;
 
     // -- Clock synchronisation -------------------------------------------
     // EMA smoothing prevents a single high-latency packet from shifting the
@@ -202,6 +206,51 @@ export class RaceNetwork {
     }
 
     this.minimap?.updateRemoteCars(ghostPositions);
+  }
+
+  /**
+   * Returns diagnostic info for the debug overlay.
+   * serverTimeOffset: smoothed estimate of (serverClock - clientClock) in ms.
+   * latestServerTick: the tick number of the last received state message.
+   * trackedPlayers: number of players with known state.
+   * bufferSize: number of snapshots in the interpolation buffer.
+   * renderTime: the server-clock timestamp that interpolation targets right now.
+   */
+  getDebugInfo(): {
+    serverTimeOffset: number;
+    latestServerTick: number;
+    trackedPlayers: number;
+    bufferSize: number;
+    renderTime: number;
+  } {
+    return {
+      serverTimeOffset: Math.round(this.serverTimeOffset),
+      latestServerTick: this._lastServerTick,
+      trackedPlayers: this.latestStates.size,
+      bufferSize: this.interpolation.getBufferSize(),
+      renderTime: Math.round(
+        this.interpolation.getDebugRenderTime(Date.now(), this.serverTimeOffset),
+      ),
+    };
+  }
+
+  /**
+   * Returns the local player's race position (1 = first) computed from
+   * server-authoritative lap counts. Ties (same lap) are unbroken — all
+   * players on the same lap share the same position number.
+   */
+  getLocalRacePosition(): number {
+    const localState = this.latestStates.get(this.localPlayerId);
+    if (!localState) return 1;
+
+    const localLap = localState.lap;
+    let aheadCount = 0;
+    for (const state of this.latestStates.values()) {
+      if (state.id !== this.localPlayerId && state.lap > localLap) {
+        aheadCount++;
+      }
+    }
+    return aheadCount + 1;
   }
 
   dispose(): void {
