@@ -418,8 +418,9 @@ function showSpectator(
 
 async function init(): Promise<void> {
   try {
-    setStatus("Loading engine…");
-    sceneResult = await setupScene(canvas);
+    sceneResult = await setupScene(canvas, (step, pct) => {
+      setStatus(`${step} (${pct}%)`);
+    });
     const { scene } = sceneResult;
 
     setStatus("Ready");

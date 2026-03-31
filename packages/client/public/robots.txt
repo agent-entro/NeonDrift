@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://br-ndt.dev/sitemap.xml

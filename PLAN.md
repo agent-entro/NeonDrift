@@ -695,14 +695,14 @@ neondrift/
 - [x] Full audio: engine hum, drift screech, boost, power-up SFX, countdown, fanfare
 - [x] Post-race results screen with XP animation, race-again, and replay share
 - [x] Replay system: tick-recorded binary, R2 upload (7-day TTL), `/watch/:replayId` playback
-- [ ] Mobile optimization: LOD, texture atlas, 30fps target on mid-range Android
-- [ ] Progressive loading: <2MB initial bundle, lazy track assets with progress bar
+- [x] Mobile optimization: LOD, texture atlas, 30fps target on mid-range Android
+- [x] Progressive loading: <2MB initial bundle, lazy track assets with progress bar
 
 **Milestone 1.5 — Launch Prep**
-- [ ] Security hardening: rate limiting, display-name sanitization, HttpOnly session cookie, CSP headers
+- [x] Security hardening: rate limiting, display-name sanitization, HttpOnly session cookie, CSP headers
 - [ ] Production deployment: Fly.io multi-region (US-East, EU-West), Cloudflare Pages, R2 lifecycle policy
 - [ ] Monitoring: Sentry (client + server), game metrics to Fly.io Grafana, `/api/health` endpoint
-- [ ] SEO & social: OG tags, Twitter Card, `robots.txt`
+- [x] SEO & social: OG tags, Twitter Card, `robots.txt`
 - [ ] Launch checklist: 3 tracks crash-free, 8-player 20Hz stability, replay E2E, rate limit verification
 
 ---

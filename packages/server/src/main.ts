@@ -12,6 +12,7 @@ import { roomsRouter } from "./routes/rooms.js";
 import { matchmakingRouter } from "./routes/matchmaking.js";
 import { replaysRouter } from "./routes/replays.js";
 import { rateLimit } from "./middleware/rateLimit.js";
+import { securityHeaders } from "./middleware/securityHeaders.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -29,7 +30,10 @@ const roomManager = new RoomManager();
 // ─── HTTP app ─────────────────────────────────────────────────────────────────
 const app = new Hono();
 
-// CORS middleware for all /api/* routes
+// Security headers on all responses
+app.use("*", securityHeaders());
+
+// CORS for all /api/* routes — must run before route handlers
 app.use("/api/*", async (c, next) => {
   await next();
   c.header("Access-Control-Allow-Origin", "*");
@@ -37,7 +41,7 @@ app.use("/api/*", async (c, next) => {
   c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 });
 
-// Handle CORS preflight for all /api/* routes
+// CORS preflight
 app.options("/api/*", (c) => {
   c.header("Access-Control-Allow-Origin", "*");
   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -45,10 +49,35 @@ app.options("/api/*", (c) => {
   return c.body(null, 204);
 });
 
-// Health check
+// Rate limiting — registered BEFORE route handlers so they apply correctly
+app.use("/api/rooms", rateLimit({ windowMs: 60_000, max: 20 }));
+app.use("/api/rooms/*", rateLimit({ windowMs: 60_000, max: 30 }));
+app.use("/api/matchmaking/*", rateLimit({ windowMs: 60_000, max: 10 }));
+
+// ─── Health check ────────────────────────────────────────────────────────────
+// /health — simple liveness (for load balancers / uptime monitors)
 app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
 
-// GET /api/rooms — list active rooms
+// /api/health — richer readiness check; returns 503 if DB is down
+app.get("/api/health", (c) => {
+  let dbOk = false;
+  try {
+    db.prepare("SELECT 1").get();
+    dbOk = true;
+  } catch {
+    // DB unreachable
+  }
+
+  const roomCount = roomManager.getRoomCount();
+  const status = dbOk ? 200 : 503;
+
+  return c.json(
+    { ok: dbOk, db: dbOk ? "ok" : "error", rooms: roomCount, ts: Date.now() },
+    status,
+  );
+});
+
+// GET /api/rooms — list active rooms (read-only, no rate limit needed)
 app.get("/api/rooms", (c) => {
   const rooms = roomManager.getActiveRooms().map((r) => ({
     roomId: r.roomId,
@@ -58,11 +87,6 @@ app.get("/api/rooms", (c) => {
   }));
   return c.json({ rooms });
 });
-
-// Rate limiting for mutation endpoints
-app.use("/api/rooms", rateLimit({ windowMs: 60_000, max: 20 }));
-app.use("/api/rooms/*", rateLimit({ windowMs: 60_000, max: 30 }));
-app.use("/api/matchmaking/*", rateLimit({ windowMs: 60_000, max: 10 }));
 
 // Mount room, matchmaking, and replay routers
 const rooms = roomsRouter(roomManager, db);
@@ -77,7 +101,7 @@ app.route("/", replays);
 app.post("/api/rooms/create-test", async (c) => {
   const { nanoid } = await import("nanoid");
   const roomId = nanoid(10);
-  const room = roomManager.createRoom(roomId, "track_city_canyon", "test-host", 8);
+  roomManager.createRoom(roomId, "track_city_canyon", "test-host", 8);
   return c.json({ roomId, wsUrl: `/ws?roomId=${roomId}` });
 });
 
@@ -107,7 +131,21 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
     const honoRes = await app.fetch(honoReq);
     const resBody = await honoRes.arrayBuffer();
-    res.writeHead(honoRes.status, Object.fromEntries(honoRes.headers.entries()));
+
+    // Node's http.ServerResponse doesn't support multi-value headers natively;
+    // collect Set-Cookie separately so cookies aren't collapsed.
+    const headersOut: Record<string, string | string[]> = {};
+    const cookies: string[] = [];
+    for (const [k, v] of honoRes.headers.entries()) {
+      if (k.toLowerCase() === "set-cookie") {
+        cookies.push(v);
+      } else {
+        headersOut[k] = v;
+      }
+    }
+    if (cookies.length > 0) headersOut["set-cookie"] = cookies;
+
+    res.writeHead(honoRes.status, headersOut);
     res.end(Buffer.from(resBody));
   } catch (err) {
     console.error("[http] handler error:", err);

@@ -18,6 +18,7 @@ import { InputManager } from "../input/InputManager.js";
 import { VirtualJoystick } from "../input/VirtualJoystick.js";
 import { LapTimer } from "./LapTimer.js";
 import { Minimap } from "./Minimap.js";
+import { detectGpuTier, qualitySettingsForTier } from "./GpuTier.js";
 
 export interface SceneSetupResult {
   engine: Engine;
@@ -27,30 +28,47 @@ export interface SceneSetupResult {
   track: TrackSystem;
   camera: GameCamera;
   input: InputManager;
+  minimap: Minimap;
   /**
-   * Register a callback that fires each render frame with the merged input
-   * state and a monotonically-increasing tick counter. Used by RaceNetwork
-   * to forward input to the server and update ghost car positions.
-   * Only one callback is supported at a time; calling again replaces it.
+   * Register a callback fired each render frame with merged input + monotonic
+   * tick counter. Used by RaceNetwork to forward input and update ghost cars.
+   * Only one callback at a time; calling again replaces the previous one.
    */
   registerNetworkTick: (cb: (input: CarPhysicsInput, tick: number) => void) => void;
 }
 
+export type SetupProgressCallback = (step: string, pct: number) => void;
+
 /**
  * Bootstrap a Babylon.js WebGPU/WebGL2 scene on the given canvas.
  * Falls back to WebGL 2 automatically if WebGPU is unavailable.
+ * Calls onProgress(label, 0-100) at each major step for progressive loading UI.
  */
-export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupResult> {
+export async function setupScene(
+  canvas: HTMLCanvasElement,
+  onProgress?: SetupProgressCallback,
+): Promise<SceneSetupResult> {
+  const report = (step: string, pct: number) => onProgress?.(step, pct);
+
+  // ── GPU tier detection ────────────────────────────────────────────────────
+  report("Detecting hardware…", 5);
+  const tier = detectGpuTier();
+  const quality = qualitySettingsForTier(tier);
+  console.log(
+    `[engine] GPU tier ${tier} — targetFps:${quality.targetFps} ` +
+    `postFx:${quality.enablePostProcessing} texScale:${quality.textureScale}`,
+  );
+
   // ── Engine init (WebGPU → WebGL2 fallback) ────────────────────────────────
+  report("Starting engine…", 10);
   let engine: Engine;
   try {
     const { WebGPUEngine } = await import("@babylonjs/core/Engines/webgpuEngine.js");
     const gpuEngine = new WebGPUEngine(canvas, {
-      antialias: true,
+      antialias: quality.tier > 0,
       adaptToDeviceRatio: true,
     });
     // 3 s timeout guards against environments where initAsync() never rejects
-    // (e.g. GPU adapter exists but has no WebGPU support — hangs indefinitely).
     await Promise.race([
       gpuEngine.initAsync(),
       new Promise<never>((_, reject) =>
@@ -60,7 +78,7 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     engine = gpuEngine as unknown as Engine;
     console.log("[engine] using WebGPU");
   } catch {
-    engine = new Engine(canvas, true, {
+    engine = new Engine(canvas, quality.tier > 0 /* antialias */, {
       preserveDrawingBuffer: true,
       stencil: true,
       adaptToDeviceRatio: true,
@@ -68,13 +86,21 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     console.log("[engine] using WebGL 2");
   }
 
+  // Hardware scaling reduces render resolution on low-tier mobile GPUs
+  // e.g. textureScale=0.5 → renders at half res, ~4× fewer pixels to shade
+  if (quality.textureScale < 1.0) {
+    engine.setHardwareScalingLevel(1 / quality.textureScale);
+  }
+
+  // ── Scene ─────────────────────────────────────────────────────────────────
+  report("Building scene…", 20);
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.02, 0.02, 0.06, 1);
 
   // ── Lights ────────────────────────────────────────────────────────────────
   const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
   ambient.intensity = 0.3;
-  ambient.diffuse = new Color3(0.4, 0.6, 1.0);   // cool blue tint
+  ambient.diffuse = new Color3(0.4, 0.6, 1.0);
   ambient.groundColor = new Color3(0.05, 0.05, 0.1);
 
   const sun = new DirectionalLight("sun", new Vector3(-1, -2, -1), scene);
@@ -91,27 +117,31 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
   skybox.material = skyMat;
   skybox.isPickable = false;
 
-  // Distant building silhouettes
-  _buildSilhouettes(scene);
+  // Building silhouettes — skip on low-tier to save draw calls
+  if (quality.tier > 0) {
+    _buildSilhouettes(scene, quality.drawDistanceMultiplier);
+  }
 
-  // ── Glow layer ────────────────────────────────────────────────────────────
-  const glow = new GlowLayer("glow", scene);
-  glow.intensity = 0.5;
+  // ── Glow layer — expensive; skip on low-tier ──────────────────────────────
+  if (quality.enableGlow) {
+    const glow = new GlowLayer("glow", scene);
+    glow.intensity = quality.tier === 2 ? 0.7 : 0.4;
+  }
 
   // ── Track ─────────────────────────────────────────────────────────────────
+  report("Loading track…", 40);
   const track = new TrackSystem(scene);
 
   // ── Car ───────────────────────────────────────────────────────────────────
+  report("Loading car…", 60);
   const car = new CarController(scene, track);
 
   // ── Lap Timer ─────────────────────────────────────────────────────────────
-  let lapTimer = new LapTimer(3, track.segments.length);
+  const lapTimer = new LapTimer(3, track.segments.length);
 
   lapTimer.onLapComplete = (lapNumber: number, _lapTimeMs: number) => {
     const lapEl = document.getElementById("lap-indicator");
-    if (lapEl) {
-      lapEl.textContent = `Lap ${lapNumber + 1} / 3`;
-    }
+    if (lapEl) lapEl.textContent = `Lap ${lapNumber + 1} / 3`;
   };
 
   lapTimer.onRaceComplete = (_totalTimeMs: number, lapTimesMs: number[]) => {
@@ -121,27 +151,22 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
   // ── Minimap ───────────────────────────────────────────────────────────────
   const minimap = new Minimap(track.splinePoints);
   const hudEl = document.getElementById("hud");
-  if (hudEl) {
-    minimap.mount(hudEl);
-  }
+  if (hudEl) minimap.mount(hudEl);
 
   // ── Input ─────────────────────────────────────────────────────────────────
   const input = new InputManager();
-
-  // Virtual joystick (mobile)
   const vj = new VirtualJoystick();
 
   // ── Camera ────────────────────────────────────────────────────────────────
+  report("Setting up camera…", 75);
   const gameCamera = new GameCamera(scene, canvas);
-  // We need an AbstractMesh — use the root node's child body mesh
   const bodyMesh = scene.getMeshByName("carBody");
-  if (bodyMesh) {
-    gameCamera.attach(bodyMesh);
-  }
+  if (bodyMesh) gameCamera.attach(bodyMesh);
 
-  // ── Post-processing ───────────────────────────────────────────────────────
-  // Set up AFTER camera creation
-  setupPostProcessing(scene, gameCamera.activeCamera);
+  // ── Post-processing — skip on low-tier ────────────────────────────────────
+  if (quality.enablePostProcessing) {
+    setupPostProcessing(scene, gameCamera.activeCamera);
+  }
 
   // ── Keyboard orbit toggle ─────────────────────────────────────────────────
   scene.onKeyboardObservable.add((kbInfo) => {
@@ -152,31 +177,38 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     }
   });
 
-  // Wire replay button
   const replayBtn = document.getElementById("results-btn-replay");
   if (replayBtn) {
-    replayBtn.addEventListener("click", () => {
-      window.location.reload();
-    });
+    replayBtn.addEventListener("click", () => window.location.reload());
   }
 
   // ── Network tick hook ─────────────────────────────────────────────────────
-  // Set by the caller (main.ts) once the race starts. Fires every frame with
-  // the merged input so RaceNetwork can forward it to the server and update
-  // ghost car positions without scene.ts needing to know about networking.
-  let networkTickCallback: ((input: CarPhysicsInput, tick: number) => void) | null = null;
+  // Set by main.ts once the race starts. Fires every frame so RaceNetwork
+  // can forward input and update ghost car positions without scene.ts
+  // needing to know about networking at all.
+  let networkTickCb: ((input: CarPhysicsInput, tick: number) => void) | null = null;
   let networkFrameTick = 0;
 
   function registerNetworkTick(cb: (input: CarPhysicsInput, tick: number) => void): void {
-    networkTickCallback = cb;
+    networkTickCb = cb;
   }
 
-  // ── Render loop / update ──────────────────────────────────────────────────
+  // ── Render loop — with optional FPS throttle for 30fps mobile target ──────
+  // The throttle works by tracking wall-clock time and returning early from
+  // onBeforeRender when we haven't waited long enough between frames.
+  const minFrameMs = quality.targetFps < 60 ? 1000 / quality.targetFps : 0;
+  let lastFrameMs = 0;
+
   scene.onBeforeRenderObservable.add(() => {
+    if (minFrameMs > 0) {
+      const now = performance.now();
+      if (now - lastFrameMs < minFrameMs) return;
+      lastFrameMs = now;
+    }
+
     const dt = engine.getDeltaTime() / 1000;
     if (dt <= 0 || dt > 0.5) return;
 
-    // Merge keyboard + virtual joystick input
     const kbState = input.getState();
     const vjState = vj.getState();
 
@@ -187,41 +219,39 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
       boost: kbState.boost,
     };
 
-    // Update game systems
     car.update(dt, mergedInput);
     track.update(dt);
     gameCamera.update(car.position, car.yaw);
-
-    // Update lap timer and minimap
     lapTimer.update(track.getNearestSegmentIndex(car.position));
     minimap.update(car.position);
-
-    // Update HUD
     _updateHUD(car.speed, car.boostEnergy, lapTimer.currentLap, 3);
 
     // Forward input to network layer (sends to server + updates ghost meshes)
-    if (networkTickCallback) {
-      networkTickCallback(mergedInput, networkFrameTick++);
+    if (networkTickCb) {
+      networkTickCb(mergedInput, networkFrameTick++);
     }
   });
 
   // ── Resize handler ────────────────────────────────────────────────────────
   window.addEventListener("resize", () => engine.resize());
 
-  // ── Render loop ───────────────────────────────────────────────────────────
-  engine.runRenderLoop(() => {
-    scene.render();
-  });
+  // ── Start render loop ─────────────────────────────────────────────────────
+  report("Starting render loop…", 95);
+  engine.runRenderLoop(() => scene.render());
 
-  return { engine, scene, canvas, car, track, camera: gameCamera, input, registerNetworkTick };
+  report("Ready", 100);
+  return { engine, scene, canvas, car, track, camera: gameCamera, input, minimap, registerNetworkTick };
 }
 
 // ─── HUD update ──────────────────────────────────────────────────────────────
-function _updateHUD(speed: number, boostEnergy: number, currentLap: number, totalLaps: number): void {
+function _updateHUD(
+  speed: number,
+  boostEnergy: number,
+  currentLap: number,
+  totalLaps: number,
+): void {
   const speedEl = document.getElementById("speed-value");
-  if (speedEl) {
-    speedEl.textContent = Math.round(speed * 3.6).toString(); // m/s → km/h
-  }
+  if (speedEl) speedEl.textContent = Math.round(speed * 3.6).toString();
 
   const boostBar = document.getElementById("boost-bar");
   if (boostBar) {
@@ -233,8 +263,7 @@ function _updateHUD(speed: number, boostEnergy: number, currentLap: number, tota
 
   const lapEl = document.getElementById("lap-indicator");
   if (lapEl) {
-    const lap = Math.min(currentLap, totalLaps);
-    lapEl.textContent = `Lap ${lap} / ${totalLaps}`;
+    lapEl.textContent = `Lap ${Math.min(currentLap, totalLaps)} / ${totalLaps}`;
   }
 }
 
@@ -244,17 +273,13 @@ function _formatTime(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   const millis = Math.floor(ms % 1000);
-  const secStr = seconds.toString().padStart(2, "0");
-  const msStr = millis.toString().padStart(3, "0");
-  return `${minutes}:${secStr}.${msStr}`;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
 }
 
 // ─── Show results screen ──────────────────────────────────────────────────────
 function _showResults(lapTimes: number[]): void {
   const resultsScreen = document.getElementById("results-screen");
-  if (resultsScreen) {
-    resultsScreen.style.display = "flex";
-  }
+  if (resultsScreen) resultsScreen.style.display = "flex";
 
   const lapsEl = document.getElementById("results-laps");
   if (lapsEl) {
@@ -263,15 +288,14 @@ function _showResults(lapTimes: number[]): void {
       .join("<br>");
   }
 
-  const totalMs = lapTimes.reduce((a, b) => a + b, 0);
   const totalEl = document.getElementById("results-total");
   if (totalEl) {
-    totalEl.textContent = `TOTAL  ${_formatTime(totalMs)}`;
+    totalEl.textContent = `TOTAL  ${_formatTime(lapTimes.reduce((a, b) => a + b, 0))}`;
   }
 }
 
-// ─── Building silhouettes ─────────────────────────────────────────────────────
-function _buildSilhouettes(scene: Scene): void {
+// ─── Building silhouettes (mid/high tier only) ────────────────────────────────
+function _buildSilhouettes(scene: Scene, drawDistMult: number): void {
   const bldgMat = new StandardMaterial("bldgMat", scene);
   bldgMat.emissiveColor = new Color3(0.015, 0.01, 0.025);
   bldgMat.diffuseColor = new Color3(0, 0, 0);
@@ -287,15 +311,16 @@ function _buildSilhouettes(scene: Scene): void {
     [150, 0, -300, 28, 90],
   ];
 
+  // LOD fade distance scales with quality tier's draw distance multiplier
+  const lodFadeDist = Math.round(400 * drawDistMult);
+
   for (let i = 0; i < positions.length; i++) {
     const [x, , z, w, h] = positions[i];
-    const bldg = MeshBuilder.CreateBox(`bldg${i}`, {
-      width: w,
-      height: h,
-      depth: w * 0.7,
-    }, scene);
+    const bldg = MeshBuilder.CreateBox(`bldg${i}`, { width: w, height: h, depth: w * 0.7 }, scene);
     bldg.position = new Vector3(x, h / 2 - 5, z);
     bldg.material = bldgMat;
     bldg.isPickable = false;
+    // LOD: buildings beyond lodFadeDist become invisible — saves GPU overdraw
+    bldg.addLODLevel(lodFadeDist, null);
   }
 }

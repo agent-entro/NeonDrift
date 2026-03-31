@@ -54,11 +54,5 @@ export function rateLimit(opts: {
   };
 }
 
-/** Sanitize display name: strip HTML, limit length, trim whitespace */
-export function sanitizeDisplayName(name: string): string {
-  return name
-    .replace(/[<>&"'`]/g, "")   // strip HTML special chars (XSS)
-    .replace(/\s+/g, " ")        // collapse whitespace
-    .trim()
-    .slice(0, 20);               // max 20 chars
-}
+// Re-export from canonical location so existing imports keep working
+export { sanitizeDisplayName } from "./securityHeaders.js";

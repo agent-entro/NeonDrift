@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import type Database from "better-sqlite3";
 import type { RoomManager } from "../game/RoomManager.js";
 import { createAnonymousSession, getOrCreateSession } from "../game/SessionManager.js";
+import { sanitizeDisplayName, setSessionCookie } from "../middleware/securityHeaders.js";
 
 const ADJECTIVES = ["neon", "cyber", "hyper", "turbo", "ghost", "nova", "pixel", "drift"];
 const NOUNS = ["wolf", "hawk", "tiger", "storm", "fire", "blade", "comet", "rider"];
@@ -48,9 +49,8 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
       return c.json({ error: "invalid_json" }, 400);
     }
 
-    // Clamp displayName to satisfy the players table CHECK (length BETWEEN 3 AND 20)
-    const rawName = typeof body.displayName === "string" ? body.displayName.trim() : "";
-    const displayName = rawName.length === 0 ? "Anonymous" : rawName.slice(0, 20).padEnd(3, "_");
+    // Sanitize and enforce DB constraint (3–20 chars)
+    const displayName = sanitizeDisplayName(body.displayName ?? "Racer");
     const trackId = resolveTrackId(body.trackId);
     const privacy = body.privacy === "invite" ? "invite" : "public";
     const maxPlayers = Math.min(8, Math.max(2, Number(body.maxPlayers) || 8));
@@ -95,6 +95,9 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
       return c.json({ error: "db_error", detail: String(err) }, 500);
     }
 
+    // Set HttpOnly cookie alongside JSON body
+    setSessionCookie(c, session.sessionToken);
+
     return c.json({
       slug,
       roomId,
@@ -107,7 +110,6 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
   app.get("/api/rooms/:slug", (c) => {
     const slug = c.req.param("slug");
 
-    // Look up in DB first
     const row = db
       .prepare<[string], RoomRow>(
         `SELECT id, slug, track_id, host_player, privacy, max_players, status FROM rooms WHERE slug = ?`,
@@ -144,10 +146,16 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
       return c.json({ error: "invalid_json" }, 400);
     }
 
-    const displayName = body.displayName ?? "Anonymous";
-    const sessionInfo = getOrCreateSession(db, body.sessionToken, displayName);
+    const displayName = sanitizeDisplayName(body.displayName ?? "Racer");
 
-    // Find room by slug in DB
+    // Honor cookie-based session token as fallback (HttpOnly sessions)
+    const cookieToken = c.req.header("cookie")
+      ?.split(";")
+      .find((s) => s.trim().startsWith("nd_session="))
+      ?.split("=")[1]
+      ?.trim();
+    const sessionInfo = getOrCreateSession(db, body.sessionToken ?? cookieToken, displayName);
+
     const row = db
       .prepare<[string], RoomRow>(
         `SELECT id, slug, track_id, host_player, privacy, max_players, status FROM rooms WHERE slug = ?`,
@@ -161,6 +169,8 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
     if (row.status === "expired" || row.status === "finished") {
       return c.json({ error: "room_not_available", status: row.status }, 410);
     }
+
+    setSessionCookie(c, sessionInfo.sessionToken);
 
     return c.json({
       sessionToken: sessionInfo.sessionToken,
