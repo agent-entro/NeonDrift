@@ -3,6 +3,19 @@ import type { ClientMessage, ServerMessage } from "@neondrift/shared";
 
 type MessageHandler = (msg: ServerMessage) => void;
 
+/**
+ * Derive the WebSocket URL from the current page location.
+ * Respects whatever base path Caddy (or another reverse proxy) is serving
+ * the app under — e.g. if the page is at /neon/, the WS URL becomes
+ * wss://host/neon/ws (which Caddy strips back to /ws for the server).
+ */
+export function defaultWsUrl(): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  // import.meta.env.BASE_URL is set by Vite's `base` config (e.g. "/neon/")
+  const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+  return `${proto}//${location.host}${base}/ws`;
+}
+
 export class NetClient {
   private ws: WebSocket | null = null;
   private url: string;
@@ -14,8 +27,8 @@ export class NetClient {
   private pendingMessages: ClientMessage[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(url: string) {
-    this.url = url;
+  constructor(url?: string) {
+    this.url = url ?? defaultWsUrl();
   }
 
   connect(): void {

@@ -20,10 +20,12 @@ export class GameCamera {
     this.canvas = canvas;
 
     // Chase camera (FollowCamera)
+    // rotationOffset=0 → camera sits behind the car (correct chase-cam view).
+    // The old value of 180 placed it in front of the car looking backward.
     this.followCam = new FollowCamera("followCam", new Vector3(0, 5, -12), scene);
     this.followCam.radius = 12;
     this.followCam.heightOffset = 5;
-    this.followCam.rotationOffset = 180;
+    this.followCam.rotationOffset = 0;
     this.followCam.cameraAcceleration = 0.05;
     this.followCam.maxCameraSpeed = 30;
 

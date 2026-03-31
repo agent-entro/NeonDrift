@@ -1,13 +1,19 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  base: "/neon/",
   server: {
-    port: 3000,
+    allowedHosts: ["agent.br-ndt.dev"],
+    port: 5174,
     proxy: {
-      "/api": "http://localhost:3001",
-      "/ws": {
+      "/neon/api": {
+        target: "http://localhost:3001",
+        rewrite: (path) => path.replace(/^\/neon/, ""),
+      },
+      "/neon/ws": {
         target: "ws://localhost:3001",
         ws: true,
+        rewrite: (path) => path.replace(/^\/neon/, ""),
       },
     },
   },

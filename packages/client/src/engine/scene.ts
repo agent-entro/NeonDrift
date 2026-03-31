@@ -42,7 +42,14 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
       antialias: true,
       adaptToDeviceRatio: true,
     });
-    await gpuEngine.initAsync();
+    // 3 s timeout guards against environments where initAsync() never rejects
+    // (e.g. GPU adapter exists but has no WebGPU support — hangs indefinitely).
+    await Promise.race([
+      gpuEngine.initAsync(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("WebGPU init timeout")), 3000),
+      ),
+    ]);
     engine = gpuEngine as unknown as Engine;
     console.log("[engine] using WebGPU");
   } catch {
