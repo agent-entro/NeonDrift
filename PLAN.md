@@ -4,7 +4,7 @@
 
 ---
 
-**Version:** 2.1 | **Date:** 2026-03-30 | **Status:** All Phases Complete — Production
+**Version:** 2.2 | **Date:** 2026-03-31 | **Status:** In Progress — Phase 1 Active
 
 ---
 
@@ -594,26 +594,24 @@ Everything not required to test that hypothesis is deferred.
 | Basic matchmaking (ELO-lite) | Solo players need opponents |
 | Spectator mode (read-only) | Viral growth loop + social |
 
-#### Phase 2 — Complete
+#### Phase 2 (Upcoming)
 | Feature | Status |
 |---|---|
-| User accounts (email/Google) | Complete |
-| Battle pass / seasons | Complete |
-| Leaderboards | Complete |
-| Clans | Complete |
-| Cosmetic shop | Complete |
-| Server-side user preferences | Complete |
-| Funnel analytics | Complete |
-| Seasonal event reward distribution | Complete |
-| A/B test framework | Complete |
-| Track editor | Deferred to Phase 3 |
-| Text/voice chat | Deferred to Phase 3 |
+| User accounts (email/Google) | Pending |
+| Battle pass / seasons | Pending |
+| Leaderboards | Pending |
+| Clans | Pending |
+| Cosmetic shop | Pending |
+| Server-side user preferences | Pending |
+| Funnel analytics | Pending |
+| Seasonal event reward distribution | Pending |
+| A/B test framework | Pending |
 
 ---
 
 ### 4.2 Phased Implementation Plan
 
-#### Phase 0: Project Scaffolding (Days 1–3) ✓ COMPLETE
+#### Phase 0: Project Scaffolding ✓ COMPLETE
 
 **Goal:** Runnable dev environment with build pipeline, hot reload, and deploy target.
 
@@ -665,209 +663,47 @@ neondrift/
 
 ---
 
-#### Phase 1A: 3D Track & Car (Days 4–8)
+#### Phase 1: Core Game Loop — IN PROGRESS
 
-**Goal:** A single car drives around a single track with correct physics, camera, and controls. No multiplayer yet — local only.
+**Goal:** A fully playable, launchable multiplayer racing game — from solo local play through live 8-player races with rooms, matchmaking, power-ups, and production deployment.
 
-**Deliverables:**
+**Milestone 1.1 — 3D Track & Car ✓ COMPLETE**
 - [x] Babylon.js scene: neon-lit track (City Canyon), skybox, post-processing (bloom, chromatic aberration)
-- [x] Car model loads from glTF. Placeholder geometry acceptable for first pass.
-- [x] Arcade car physics using Havok:
-  - Steering with drift (oversteer on turn + throttle)
-  - Speed boost (temporary velocity multiplier)
-  - Collision with track walls (bounce, not stop)
-  - Gravity + ramps (airtime feels right)
-  - Off-track detection → auto-respawn after 3s
-- [x] Camera: chase cam (smooth follow behind car), orbit on results screen
-- [x] Input handlers:
-  - Mobile: virtual joystick (left thumb), brake button (right thumb), tilt steering option
-  - Desktop: WASD / arrow keys, space = boost
-  - Gamepad: left stick + triggers + A button
-  - Input scheme stored in localStorage
-- [x] HUD overlay (vanilla DOM, positioned over canvas):
-  - Speed indicator
-  - Lap counter (1/3, 2/3, 3/3)
-  - Boost meter (fills over time, depletes on use)
-  - Race position (placeholder — always shows "1st" until multiplayer)
-- [x] Minimap: top-down SVG of track outline + car dot
-- [x] Lap timing: start/finish line detection, per-lap time tracking
-- [x] Race completion: 3 laps → results screen with times
+- [x] Car model loads from glTF with Havok arcade physics (drift, boost, wall bounce, off-track respawn)
+- [x] Input handlers: mobile (virtual joystick + tilt), desktop (WASD), gamepad
+- [x] HUD overlay: speed, lap counter, boost meter, minimap
+- [x] Lap timing, start/finish line detection, race completion (3 laps → results screen)
 
-**Physics tuning budget:** Reserve 2 days. Arcade physics that *feel* good (responsive, forgiving, satisfying drift) is the single most important factor for retention. Do not ship until test players say "this feels fun."
+**Milestone 1.2 — Multiplayer Netcode**
+- [ ] WebSocket game protocol (MessagePack binary frames)
+- [ ] Server-authoritative game loop at 20Hz with delta-compressed state broadcast
+- [ ] Client-side prediction + smooth reconciliation
+- [ ] Interpolation for remote players
+- [ ] Reconnection with configurable grace period (`RECONNECT_GRACE_MS`)
+- [ ] Room lifecycle: lobby → countdown → racing → finished → cleanup
 
----
+**Milestone 1.3 — Rooms, Matchmaking & Lobby**
+- [ ] Landing page with 3D hero, [CREATE ROOM] and [QUICK PLAY] flows
+- [ ] Room creation and join APIs with slug generation and session tokens
+- [ ] Lobby UI: player list, ready toggle, host controls, copy-link button
+- [ ] In-memory matchmaking queue with ELO brackets and region bucketing
+- [ ] Spectator mode (read-only WS connection, camera follows leader)
 
-#### [DONE] Phase 1B: Multiplayer Netcode (Days 9–14)
+**Milestone 1.4 — Power-ups, Polish & Replay**
+- [ ] 5 power-ups: Speed Boost, Shield, EMP Pulse, Gravity Well, Time Warp (server-authoritative)
+- [ ] 3 fully built tracks: City Canyon, Orbital Loop, Crystal Caverns
+- [ ] Full audio: engine hum, drift screech, boost, power-up SFX, countdown, fanfare
+- [ ] Post-race results screen with XP animation, race-again, and replay share
+- [ ] Replay system: tick-recorded binary, R2 upload (7-day TTL), `/watch/:replayId` playback
+- [ ] Mobile optimization: LOD, texture atlas, 30fps target on mid-range Android
+- [ ] Progressive loading: <2MB initial bundle, lazy track assets with progress bar
 
-**Goal:** 8 players race simultaneously with <100ms perceived latency. This is the hardest engineering challenge in the project.
-
-**Deliverables:**
-- [x] **WebSocket game protocol** (MessagePack binary):
-  ```
-  Client → Server:
-    { type: "input", tick: u32, steering: f32, throttle: f32, brake: bool, boost: bool }
-
-  Server → Client:
-    { type: "state", tick: u32, players: [{ id, pos: [x,y,z], rot: [x,y,z,w], vel: [x,y,z], lap, powerup }] }
-    { type: "event", kind: "powerup_used"|"lap_complete"|"respawn"|"finish", data: {...} }
-  ```
-- [x] **Server authoritative game loop** (20Hz / 50ms tick):
-  - Receive input buffer from each client
-  - Step physics simulation (server-side Havok or simplified physics model)
-  - Validate positions (anti-cheat: reject teleports, speed hacks)
-  - Broadcast delta-compressed state to all clients
-- [x] **Client-side prediction:**
-  - Apply local input immediately (zero perceived latency)
-  - On receiving server state: compare predicted vs authoritative
-  - If divergence > threshold: smoothly interpolate toward server state over 100ms (no snap)
-- [x] **Delta compression:**
-  - Only send changed fields per player per tick
-  - Position quantized to 0.01m precision (16-bit per axis)
-  - Rotation sent as compressed quaternion (smallest-three encoding, 6 bytes)
-  - Target: ~8 KB/s per player at 20Hz with 8 players
-- [x] **Interpolation for remote players:**
-  - Buffer 2 server ticks (~100ms)
-  - Interpolate remote car positions between buffered states
-  - Smooth, no jitter, even at 100ms ping
-- [x] **Reconnection:**
-  - Server keeps player slot for configurable grace period on disconnect (default 10s, operator-tunable via `RECONNECT_GRACE_MS` env var)
-  - Car drives straight at last velocity
-  - Client reconnects → receives full state → resumes
-- [x] **Room lifecycle on server:**
-  - Room created → lobby state → countdown → racing → finished → cleanup
-  - Max 30 rooms per server process (profiled, adjust based on CPU)
-  - Room expires 5 min after last player leaves
-
----
-
-#### Phase 1C: Rooms, Matchmaking & Lobby (Days 15–19)
-
-**Goal:** Players can create rooms, share links, join via matchmaking, and see each other in a lobby.
-
-**Deliverables:**
-- [x] **Landing page** (`/`):
-  - 3D hero animation (car drifting, Babylon.js)
-  - [CREATE ROOM] → room settings modal
-  - [QUICK PLAY] → matchmaking queue
-  - Minimal copy: tagline, 3 feature bullets, no scroll
-- [x] **Room creation API** (`POST /api/rooms`):
-  - Generate slug (adjective-noun-number: "blazing-iguana-7")
-  - Create room + player rows in SQLite
-  - Return slug + session token
-  - Rate limit: 10 rooms/hour per IP (in-memory counter)
-- [x] **Room join API** (`POST /api/rooms/:slug/join`):
-  - Validate room exists, not full, not expired
-  - Create player (or restore from session token cookie)
-  - Return room state + WS endpoint
-- [x] **Lobby UI** (`/r/:slug`):
-  - 3D track preview (slow rotate)
-  - Player list (slots 1–8, shows name + ready state)
-  - Ready button (green toggle)
-  - Host controls: [START RACE] (enabled when ≥2 ready)
-  - Copy link button (clipboard API)
-  - 30s auto-start timer when ≥2 players and room is public
-- [x] **Matchmaking** (`POST /api/matchmaking/join`):
-  - In-memory queue, bucketed by region (derived from Fly.io region header)
-  - ELO brackets: 0–800, 800–1200, 1200–1600, 1600+
-  - Fill to 8 or timeout at 30s (create room with available players)
-  - Bracket relaxation at 45s (merge adjacent brackets)
-  - Cancel endpoint: `DELETE /api/matchmaking`
-- [x] **Spectator mode**:
-  - If room status is "racing", show [SPECTATE] option
-  - WS connects in read-only mode (no input accepted, no slot consumed)
-  - Camera follows race leader by default; dropdown to select any racer
-
----
-
-#### Phase 1D: Power-ups, Polish & Replay (Days 20–25)
-
-**Goal:** The game is fun, shareable, and launch-ready.
-
-**Deliverables:**
-- [x] **5 power-ups** (3 original + 2 new hazard types):
-  - **Speed Boost**: 2s of 1.5x speed. Spawns on track as glowing orbs.
-  - **Shield**: 3s invulnerability to EMP. Visual: hexagonal shell around car.
-  - **EMP Pulse**: Slows all cars within 30m radius for 1.5s. Visual: expanding ring.
-  - **Gravity Well**: Pulls nearby cars off their racing line for 2s. Visual: collapsing vortex. Server-authoritative radius check (25m).
-  - **Time Warp**: Briefly reverses affected cars to their position 1.2s ago. Visual: desaturated ghost trail. Server validates state snapshot before applying rewind.
-  - Spawn system: fixed positions on track, respawn 15s after pickup
-  - Server validates all power-up usage (anti-cheat)
-- [x] **3 tracks fully built:**
-  - City Canyon: urban neon, tight turns, 1 ramp
-  - Orbital Loop: space station, wide sweeping curves, low gravity section
-  - Crystal Caverns: underground, narrow passages, 2 shortcuts
-- [x] **Audio:**
-  - Engine hum (pitch-shifted by speed)
-  - Drift screech
-  - Boost whoosh
-  - Power-up pickup chime
-  - EMP pulse
-  - Countdown beeps (3-2-1-GO)
-  - Finish line fanfare
-- [x] **Post-race results screen:**
-  - Final standings (1st–8th) with names and total times
-  - Best lap highlight
-  - XP earned animation (store locally until accounts exist)
-  - [RACE AGAIN] → re-queue in same room
-  - [SHARE REPLAY] → generate replay URL
-- [x] **Replay system:**
-  - Server records all position/rotation/event data per tick during race
-  - Compress with MessagePack + gzip (~50KB for 4-min race)
-  - Upload to R2 with 7-day TTL
-  - Replay URL: `/watch/:replayId` — loads ghost playback, no live server needed
-  - Camera: cinematic auto-switch or manual player follow
-- [x] **Mobile optimization pass:**
-  - Test on Redmi Note 12, iPhone SE, Samsung A14
-  - Reduce draw calls: LOD system, texture atlas, instanced rendering
-  - Target: 30fps on mid-range Android, 60fps on iPhone 12+
-  - Touch controls feel test: joystick dead zone, tilt sensitivity, brake responsiveness
-- [x] **Loading optimization:**
-  - Progressive asset loading: UI-interactive first, 3D streams in background
-  - Total initial download <2MB (compressed)
-  - Track assets lazy-loaded per track (<3MB each, Draco + KTX2)
-  - Show loading progress bar with percentage
-
----
-
-#### Phase 1E: Launch Prep (Days 26–28)
-
-**Goal:** Production-ready deployment with monitoring and basic security.
-
-**Deliverables:**
-- [x] **Security hardening:**
-  - Rate limiting on all public endpoints (in-memory, IP-based)
-  - Display name sanitization (strip HTML/XML special chars server-side)
-  - Session token as `HttpOnly` + `SameSite=Strict` cookie (not localStorage)
-  - CSP headers via Hono middleware
-  - Input validation on all API endpoints (max lengths, allowed characters)
-- [x] **Production deployment:**
-  - Fly.io: 2 regions minimum (US-East, EU-West) for launch
-  - Cloudflare Pages: production domain, SSL, caching headers
-  - R2 bucket for replays with lifecycle policy (7-day auto-delete)
-  - SQLite database backed up daily (Fly.io volume snapshot)
-- [x] **Monitoring:**
-  - Sentry SDK on client + server (error tracking)
-  - Custom game metrics logged to stdout (Fly.io Grafana):
-    - CCU (concurrent users) per region
-    - Rooms active
-    - Median tick processing time
-    - P95 client-reported latency
-    - Race completion rate
-  - Health endpoint: `GET /api/health` (DB + WS status)
-- [x] **SEO & social:**
-  - `<html lang="en">` (WCAG 3.1.1)
-  - OG tags + Twitter Card for landing page and replay URLs
-  - `robots.txt`: allow `/`, disallow `/r/`, `/ws/`
-  - Inline meta description + title
-- [x] **Launch checklist:**
-  - [x] 3 tracks playable with no crashes across 50 test races
-  - [x] 8-player race stable at 20Hz for 5 minutes
-  - [x] Mobile: 30fps on Redmi Note 12 (Android mid-range baseline)
-  - [x] Replay share works end-to-end
-  - [x] Matchmaking fills a room within 30s with 8 test players
-  - [x] Reconnection works (kill WS, rejoin within configurable grace window)
-  - [x] No XSS in display name rendering
-  - [x] Rate limiting verified (hammer test)
+**Milestone 1.5 — Launch Prep**
+- [ ] Security hardening: rate limiting, display-name sanitization, HttpOnly session cookie, CSP headers
+- [ ] Production deployment: Fly.io multi-region (US-East, EU-West), Cloudflare Pages, R2 lifecycle policy
+- [ ] Monitoring: Sentry (client + server), game metrics to Fly.io Grafana, `/api/health` endpoint
+- [ ] SEO & social: OG tags, Twitter Card, `robots.txt`
+- [ ] Launch checklist: 3 tracks crash-free, 8-player 20Hz stability, replay E2E, rate limit verification
 
 ---
 
@@ -937,49 +773,37 @@ The MVP is successful if, after 2 weeks of public availability:
 | Race load time (link tap → lobby) | <5s on 4G | Client-reported metric |
 | Zero critical bugs in production | 0 Sentry P0s | Sentry dashboard |
 
-If these targets are met, proceed to Phase 2 (accounts, battle pass, leaderboards, 3 more tracks).
+If these targets are met, proceed to Phase 2 (accounts, battle pass, leaderboards).
 
 ---
 
----
+#### Phase 2: Multiplayer Systems — PENDING
 
-## 5. Completion Notes (v2.1)
+**Goal:** Persistent player identities, progression, social features, and monetisation.
 
-All previously identified gaps and deferred items have been resolved. Below is a summary of what was delivered in each area.
-
-### 5.1 Previously Identified Gaps — Resolved
-
-| Gap | Resolution |
-|---|---|
-| **Gravity Well hazard** | Implemented as a 5th power-up. Server-side `GravityWellSystem` performs a radius sweep (25m) each tick and applies a directional impulse away from the well center. Clients render a collapsing vortex particle effect. Anti-cheat: only server applies the impulse; client effect is cosmetic only. |
-| **Time Warp hazard** | Implemented as a 6th power-up. Server stores a ring buffer of authoritative positions (last 60 ticks = 3s at 20Hz) per player. On Time Warp activation, affected players within 20m radius are snapped back to their position 24 ticks (~1.2s) ago. Clients play a desaturated ghost-trail rewind animation. Prevents abuse: 30s cooldown per room, max 1 active Time Warp per race at a time. |
-| **Configurable reconnect grace period** | Grace window is now controlled by the `RECONNECT_GRACE_MS` environment variable (default: `10000`). Operator can tune per-region without a code deploy. Value is validated at startup (min 3s, max 60s). Exposed on `GET /api/health` as `reconnectGraceMs`. |
-| **Server-side user preferences** | New `player_preferences` table (migration `014`) stores per-player settings: `control_scheme`, `tilt_sensitivity`, `sfx_volume`, `music_volume`, `graphics_quality`, `accessibility_flags` (colorblind mode, reduced motion). REST endpoints: `GET /api/me/preferences` and `PATCH /api/me/preferences`. Preferences are merged onto session restore so settings persist across devices. |
-| **Funnel analytics** | `analytics_events` table (migration `015`) records structured events: `session_start`, `room_view`, `name_entered`, `lobby_ready`, `race_started`, `race_finished`, `race_abandoned`, `replay_shared`. Each event includes `session_id`, `player_id` (nullable for anonymous), `room_id`, `ts`, and a JSON `props` blob. A nightly `setInterval` job aggregates conversion rates into `analytics_funnels` for the ops dashboard. No third-party analytics SDK — all data stays on-prem. |
-| **Seasonal event reward distribution** | `seasonal_events` and `seasonal_event_rewards` tables (migrations `016–017`) model limited-time events (e.g., "Neon Solstice", "Turbo Tuesday"). Each event has a start/end window, a point multiplier, and a reward ladder. A background job (`EventRewardWorker`) runs at season-event end: queries top-N finishers, inserts `player_cosmetics` rows for earned rewards, and sends a `SEASON_REWARD` WebSocket message to any online recipients. Idempotent: rewards are keyed on `(player_id, event_id)` to prevent double-grant on restart. |
-| **A/B test framework** | Lightweight server-side framework (`packages/server/src/experiments/`). Experiments are defined in `experiments.json` (name, variants, traffic split, start/end date). Assignment uses a deterministic hash of `player_id + experiment_name` — no randomness after first assignment. Assignments are stored in `ab_assignments` table (migration `018`) for analysis. Helper `getVariant(playerId, experimentName)` is used at decision points. Results are queryable via `GET /api/internal/experiments/:name/results` (internal auth required). |
-
-### 5.2 Phase 2 Feature Summary
-
-- **User accounts**: Email + Google OAuth. Session tokens promoted to persistent accounts on opt-in. Existing anonymous progress migrated via merge flow.
-- **Battle pass / seasons**: 6-week seasons, 30 tiers, free and premium tracks. XP calibrated from Phase 1 retention data (median 2.3 races/session → ~70 races/season completion).
-- **Leaderboards**: Global and per-region ELO rankings, season XP rankings, clan XP rankings. Cached with 5-minute TTL; live badge on profile.
-- **Clans**: Create/join/leave, officer roles, clan XP (aggregated from members), weekly clan leaderboard.
-- **Cosmetic shop**: One-time purchase cosmetics and seasonal bundles. Stripe Checkout integration. No loot boxes — direct purchase only.
-- **Server-side user preferences**: See gap resolution above.
-- **Funnel analytics**: See gap resolution above.
-- **Seasonal event reward distribution**: See gap resolution above.
-- **A/B test framework**: See gap resolution above.
-
-### 5.3 Known Deferred Items (Phase 3)
-
-| Item | Notes |
-|---|---|
-| Track editor | Scoped for Phase 3. Requires asset pipeline tooling and moderation for community-uploaded tracks. |
-| Text/voice chat | Scoped for Phase 3. Text chat requires profanity filter and report flow. Voice requires WebRTC and TURN infrastructure. |
-| WebRTC peer-to-peer (voice) | Prerequisite for voice chat. |
-| Cross-region room federation | Currently each Fly.io region is isolated. Cross-region rooms require relay architecture. |
+**Deliverables:**
+- [ ] User accounts: email + Google OAuth; anonymous progress migrated on opt-in
+- [ ] Battle pass / seasons: 6-week seasons, 30 tiers, free and premium tracks
+- [ ] Leaderboards: global and per-region ELO rankings, season XP rankings, clan XP rankings
+- [ ] Clans: create/join/leave, officer roles, clan XP aggregation, weekly clan leaderboard
+- [ ] Cosmetic shop: direct-purchase items and seasonal bundles via Stripe Checkout (no loot boxes)
+- [ ] Server-side user preferences: control scheme, tilt sensitivity, volume, graphics quality, accessibility flags
+- [ ] Funnel analytics: structured event table (`session_start` → `race_finished`), nightly aggregation job
+- [ ] Seasonal event reward distribution: limited-time events with point multipliers and reward ladders
+- [ ] A/B test framework: deterministic hash assignment, per-experiment variant results endpoint
 
 ---
 
-*NeonDrift Technical Plan v2.1 — All Phase 1 and Phase 2 deliverables complete. Production.*
+#### Phase 3: Live Operations & Polish — PENDING
+
+**Goal:** Community tools, cross-region infrastructure, and real-time communication.
+
+**Deliverables:**
+- [ ] Track editor: in-browser asset pipeline tooling, moderation queue for community-uploaded tracks
+- [ ] Text chat: in-lobby and post-race text chat with profanity filter and report/mute flow
+- [ ] Voice chat: WebRTC peer-to-peer audio with TURN server infrastructure
+- [ ] Cross-region room federation: relay architecture so players across Fly.io regions can race together
+
+---
+
+*NeonDrift Technical Plan v2.2 — Phase 0 complete, Phase 1 in progress.*
