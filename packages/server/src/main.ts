@@ -57,7 +57,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
   const honoReq = new Request(url, {
     method: req.method ?? "GET",
-    headers: req.headers as HeadersInit,
+    headers: req.headers as Record<string, string>,
     body: body?.length ? body : undefined,
   });
 
