@@ -55,6 +55,14 @@ export class RaceNetwork {
     // Update clock offset estimate
     this.serverTimeOffset = stateMsg.server_time - Date.now();
 
+    // Diagnostic: log first 5 ticks to confirm we're receiving state for remote players
+    if (stateMsg.tick < 5) {
+      console.log(
+        `[RaceNetwork] tick=${stateMsg.tick} full=${stateMsg.players.length} deltas=${stateMsg.deltas.length} is_full_sync=${stateMsg.is_full_sync}`,
+        stateMsg.players.map((p) => p.id),
+      );
+    }
+
     // Full snapshots
     for (const player of stateMsg.players) {
       this.baselines.set(player.id, player);

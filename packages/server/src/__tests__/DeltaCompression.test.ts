@@ -264,4 +264,87 @@ describe("Delta-compressed state broadcast", () => {
 
     room.cleanup();
   });
+
+  /**
+   * Regression test for the "ghost car teleports to infinity" bug.
+   *
+   * Root cause: The server computed deltas relative to the LAST FULL SYNC
+   * position (baseline never advanced on delta ticks), but the client applied
+   * each delta on top of the LAST RECEIVED position (baseline advanced each
+   * tick). This caused ghost cars to diverge exponentially from real positions.
+   *
+   * Directly testable symptom: each delta value from the server must represent
+   * a SINGLE TICK of movement (≤ top_speed × TICK_MS), never the cumulative
+   * displacement from the last full sync (which grows every tick).
+   *
+   * At top speed 35 m/s × 50 ms = 1.75 m = 175 quantized units (int16 @ 1cm).
+   * Before the fix: dz at tick N = N × per_tick_velocity → 10th tick ≈ 10×
+   * larger than 1st, easily exceeding MAX_SINGLE_TICK_DZ.
+   */
+  it("delta baselines advance each tick so client reconstruction stays accurate", () => {
+    const room = createRoom();
+    const ws1 = makeMockWs();
+    const ws2 = makeMockWs();
+    startRace(room, ws1, ws2);
+
+    // Give both players forward throttle so they move every tick
+    room.handleMessage("p1", {
+      type: "input", tick: 0, steering: 0, throttle: 1, brake: false, boost: false,
+    });
+    room.handleMessage("p2", {
+      type: "input", tick: 0, steering: 0, throttle: 1, brake: false, boost: false,
+    });
+
+    // Run tick 0 (full sync) + 30 delta ticks (enough for car to approach top speed)
+    vi.advanceTimersByTime(31 * 50); // 31 × 50ms = 1.55 s
+
+    const states = ws1.stateMsgs();
+    expect(states.length).toBe(31);
+
+    // ── Check: every server delta is bounded by one tick's max displacement ───
+    // top_speed = 35 m/s; TICK_MS = 50 ms → max displacement = 1.75 m
+    // quantized at 100 units/m → MAX = 175, with 25-unit headroom for float rounding
+    const MAX_SINGLE_TICK_DZ = 200;
+
+    for (const s of states.slice(1)) { // skip tick 0 (full sync)
+      for (const delta of s.deltas) {
+        // Each delta must fit within one tick's displacement.
+        // Before the fix: dz at tick N = cumulative distance from sync tick → grows each tick.
+        // After the fix:  dz at tick N = per-frame velocity → bounded by max speed per tick.
+        expect(Math.abs(delta.dz)).toBeLessThan(MAX_SINGLE_TICK_DZ);
+        expect(Math.abs(delta.dx)).toBeLessThan(MAX_SINGLE_TICK_DZ);
+        expect(Math.abs(delta.dy)).toBeLessThan(MAX_SINGLE_TICK_DZ);
+      }
+    }
+
+    // ── Simulated client reconstruction: incremental stacking of deltas ───────
+    // Mirrors RaceNetwork.handleMessage exactly.
+    const clientBaseline = new Map<string, { x: number; z: number }>();
+    const tick0 = states[0];
+    for (const p of tick0.players) {
+      clientBaseline.set(p.id, { x: p.pos.x, z: p.pos.z });
+    }
+
+    // Apply all 30 delta ticks
+    for (const s of states.slice(1)) {
+      for (const delta of s.deltas) {
+        const bl = clientBaseline.get(delta.id);
+        if (!bl) continue;
+        clientBaseline.set(delta.id, {
+          x: bl.x + delta.dx / 100,
+          z: bl.z + delta.dz / 100,
+        });
+      }
+    }
+
+    // The client's reconstructed position after 30 delta ticks should be in
+    // the same order of magnitude as 30 ticks at ~10-35 m/s ≈ 15–52 m of travel.
+    // It must NOT be thousands of meters (which is what happens before the fix,
+    // because cumulative deltas stack as pos_0 + Σ(pos_N-pos_0) = N×pos_30 - (N-1)×pos_0).
+    for (const [, pos] of clientBaseline) {
+      expect(Math.abs(pos.z)).toBeLessThan(200); // reasonable upper bound (200 m)
+    }
+
+    room.cleanup();
+  });
 });

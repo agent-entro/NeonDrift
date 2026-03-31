@@ -524,6 +524,10 @@ export class GameRoom {
     const isFullSync = this.tick % FULL_SYNC_INTERVAL === 0;
     const fullPlayers: PlayerGameState[] = [];
     const deltaPlayers: PlayerPositionDelta[] = [];
+    const connectedCount = [...this.players.values()].filter((s) => s.ws !== null).length;
+    if (this.tick === 0) {
+      console.log(`[room:${this.roomId}] tick=0 full-sync: ${this.players.size} players (${connectedCount} connected)`);
+    }
 
     for (const session of this.players.values()) {
       if (session.isSpectator) continue;
@@ -583,15 +587,24 @@ export class GameRoom {
             speed: clamp16(state.speed * SPEED_QUANTIZE),
           });
 
-          // Rebase when accumulated delta would overflow int16
-          const accDx = Math.abs(state.x - baseline.x) * POS_QUANTIZE;
-          const accDz = Math.abs(state.z - baseline.z) * POS_QUANTIZE;
-          if (accDx > INT16_MAX * 0.8 || accDz > INT16_MAX * 0.8) {
-            // Force full sync next tick by clearing baseline
-            this.deltaBaselines.delete(session.playerId);
-          }
+          // *** CRITICAL: advance the baseline to the current position so the
+          // next delta is computed relative to THIS tick, not the original full
+          // sync. The client applies each delta on top of its own incrementally-
+          // updated baseline, so both sides must share the same reference point.
+          // Failing to do this causes ghost positions to diverge exponentially
+          // within the first few ticks (each delta grows by the full displacement
+          // from the full-sync point, but the client stacks them additively).
+          this.deltaBaselines.set(session.playerId, {
+            x: state.x,
+            y: state.y,
+            z: state.z,
+            yaw: state.yaw,
+            speed: state.speed,
+            lap: session.lap,
+          });
         }
-        // If not moved at all: omit this player from the message entirely
+        // If not moved at all: omit this player from the delta; baseline is
+        // unchanged so the next active tick computes the correct cumulative diff.
       }
     }
 
@@ -609,6 +622,14 @@ export class GameRoom {
       is_full_sync: isFullSync,
       baseline_tick: this.baselineTick,
     };
+
+    // Diagnostic: log first 5 ticks so we can verify all players are included
+    if (this.tick < 5) {
+      const recipients = [...this.players.values()].filter((s) => s.ws?.readyState === 1 /* OPEN */).length;
+      console.log(
+        `[room:${this.roomId}] tick=${this.tick} full=${fullPlayers.length} deltas=${deltaPlayers.length} recipients=${recipients}`,
+      );
+    }
 
     this.broadcast(msg);
   }
