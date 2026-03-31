@@ -11,7 +11,7 @@ import {
   GlowLayer,
 } from "@babylonjs/core";
 import { TrackSystem } from "./track.js";
-import { CarController } from "./car.js";
+import { CarController, type CarPhysicsInput } from "./car.js";
 import { GameCamera } from "./camera.js";
 import { setupPostProcessing } from "./postprocess.js";
 import { InputManager } from "../input/InputManager.js";
@@ -27,6 +27,13 @@ export interface SceneSetupResult {
   track: TrackSystem;
   camera: GameCamera;
   input: InputManager;
+  /**
+   * Register a callback that fires each render frame with the merged input
+   * state and a monotonically-increasing tick counter. Used by RaceNetwork
+   * to forward input to the server and update ghost car positions.
+   * Only one callback is supported at a time; calling again replaces it.
+   */
+  registerNetworkTick: (cb: (input: CarPhysicsInput, tick: number) => void) => void;
 }
 
 /**
@@ -153,6 +160,17 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     });
   }
 
+  // ── Network tick hook ─────────────────────────────────────────────────────
+  // Set by the caller (main.ts) once the race starts. Fires every frame with
+  // the merged input so RaceNetwork can forward it to the server and update
+  // ghost car positions without scene.ts needing to know about networking.
+  let networkTickCallback: ((input: CarPhysicsInput, tick: number) => void) | null = null;
+  let networkFrameTick = 0;
+
+  function registerNetworkTick(cb: (input: CarPhysicsInput, tick: number) => void): void {
+    networkTickCallback = cb;
+  }
+
   // ── Render loop / update ──────────────────────────────────────────────────
   scene.onBeforeRenderObservable.add(() => {
     const dt = engine.getDeltaTime() / 1000;
@@ -162,7 +180,7 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     const kbState = input.getState();
     const vjState = vj.getState();
 
-    const mergedInput = {
+    const mergedInput: CarPhysicsInput = {
       steer: kbState.steer !== 0 ? kbState.steer : vjState.steer,
       throttle: Math.max(kbState.throttle, vjState.throttle),
       brake: Math.max(kbState.brake, vjState.brake),
@@ -180,6 +198,11 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
 
     // Update HUD
     _updateHUD(car.speed, car.boostEnergy, lapTimer.currentLap, 3);
+
+    // Forward input to network layer (sends to server + updates ghost meshes)
+    if (networkTickCallback) {
+      networkTickCallback(mergedInput, networkFrameTick++);
+    }
   });
 
   // ── Resize handler ────────────────────────────────────────────────────────
@@ -190,7 +213,7 @@ export async function setupScene(canvas: HTMLCanvasElement): Promise<SceneSetupR
     scene.render();
   });
 
-  return { engine, scene, canvas, car, track, camera: gameCamera, input };
+  return { engine, scene, canvas, car, track, camera: gameCamera, input, registerNetworkTick };
 }
 
 // ─── HUD update ──────────────────────────────────────────────────────────────

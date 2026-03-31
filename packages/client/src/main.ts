@@ -8,8 +8,9 @@
 //   5. '/watch/:roomId'→ Spectator mode
 //   6. Start router (handles current hash + future changes)
 
-import { setupScene } from "./engine/scene.js";
+import { setupScene, type SceneSetupResult } from "./engine/scene.js";
 import { NetClient, defaultWsUrl } from "./net/NetClient.js";
+import { RaceNetwork } from "./net/RaceNetwork.js";
 import { router } from "./ui/router.js";
 import { mountLanding } from "./ui/screens/Landing.js";
 import { mountCreateRoomModal } from "./ui/screens/CreateRoomModal.js";
@@ -58,6 +59,9 @@ function saveSession(s: StoredSession): void {
     // ignore
   }
 }
+
+// ── Scene result (set once after engine init) ─────────────────────────────────
+let sceneResult: SceneSetupResult | null = null;
 
 // ── Active unmount function (tracks current overlay) ─────────────────────────
 let currentUnmount: (() => void) | null = null;
@@ -317,11 +321,37 @@ async function showLobbyWithSession(
     lobbyState,
     netClient,
     () => {
-      // Race started — unmount lobby, enable game input
-      unmountCurrent();
+      // Race started.
+      //
+      // IMPORTANT: do NOT call unmountCurrent() here — that would call
+      // currentNetClient.disconnect() and kill the WebSocket we need for
+      // the race. Instead, tear down only the lobby DOM overlay and leave
+      // the NetClient alive.
+      if (currentUnmount) {
+        currentUnmount();   // removes lobby DOM + unsubscribes lobby message handler
+        currentUnmount = null;
+      }
+      // currentNetClient intentionally kept alive
+
       const hud = document.getElementById("hud");
       if (hud) hud.style.display = "";
-      console.log("[main] race started!");
+
+      // Wire up race networking: ghost cars + input forwarding
+      if (sceneResult) {
+        const raceNet = new RaceNetwork(
+          sceneResult.scene,
+          netClient,
+          session.playerId,
+        );
+        sceneResult.registerNetworkTick((input, tick) => {
+          raceNet.tick(input, tick);
+        });
+
+        // Store cleanup so navigating away disposes ghosts + unsubscribes
+        currentUnmount = () => raceNet.dispose();
+      }
+
+      console.log("[main] race started — RaceNetwork active");
     },
   );
 }
@@ -389,7 +419,8 @@ function showSpectator(
 async function init(): Promise<void> {
   try {
     setStatus("Loading engine…");
-    const { scene } = await setupScene(canvas);
+    sceneResult = await setupScene(canvas);
+    const { scene } = sceneResult;
 
     setStatus("Ready");
     await new Promise<void>((r) => setTimeout(r, 300));
