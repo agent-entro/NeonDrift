@@ -408,6 +408,20 @@ async function init(): Promise<void> {
       .on("/r/:slug", (params) => void showLobby(params))
       .on("/watch/:roomId", (params) => showSpectator(params, scene));
 
+    // ── Invite / direct-join URL detection ──────────────────────────────────
+    // Detect pathname of the form <base>/join/<slug> (e.g. /neon/join/neon-tiger-99).
+    // When someone arrives via a share link we translate it to the hash route
+    // before starting the router so the normal lobby flow takes over.
+    const pathParts = window.location.pathname.split("/").filter(Boolean);
+    // pathParts looks like: ["neon", "join", "neon-tiger-99"]
+    const joinIdx = pathParts.indexOf("join");
+    if (joinIdx !== -1 && pathParts.length > joinIdx + 1) {
+      const slug = decodeURIComponent(pathParts[joinIdx + 1]);
+      // Rewrite the URL to hash form so the router (and back-button) work cleanly
+      history.replaceState(null, "", `${API_BASE}/#/r/${slug}`);
+      console.log(`[main] invite link detected — auto-joining room #${slug}`);
+    }
+
     // Start router — handles current hash and future hash changes
     router.start();
 

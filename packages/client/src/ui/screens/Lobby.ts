@@ -66,6 +66,14 @@ function injectLobbyStyles(): void {
       border-color: #00f5ff;
       color: #00f5ff;
     }
+    .nd-lobby-invite-url {
+      font-size: 0.68rem;
+      color: rgba(0, 245, 255, 0.35);
+      letter-spacing: 0.04em;
+      word-break: break-all;
+      line-height: 1.4;
+      margin-top: -8px;
+    }
     .nd-lobby-track-info {
       font-size: 0.78rem;
       color: rgba(200, 220, 255, 0.45);
@@ -245,27 +253,39 @@ export function mountLobby(
   roomNameEl.className = "nd-lobby-room-name";
   roomNameEl.textContent = `#${state.roomSlug}`;
 
+  // Build the canonical invite URL: <origin><base>/join/<slug>
+  // e.g. https://game.example.com/neon/join/neon-tiger-99
+  const _base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
+  const inviteUrl = `${window.location.origin}${_base}/join/${state.roomSlug}`;
+
   const copyBtn = document.createElement("button");
   copyBtn.className = "nd-lobby-copy-btn";
-  copyBtn.textContent = "Copy Link";
-  copyBtn.addEventListener("click", () => {
-    navigator.clipboard.writeText(window.location.href).then(() => {
+  copyBtn.textContent = "Copy Invite Link";
+
+  function doCopy(): void {
+    navigator.clipboard.writeText(inviteUrl).then(() => {
       copyBtn.textContent = "Copied!";
-      setTimeout(() => { copyBtn.textContent = "Copy Link"; }, 1800);
+      setTimeout(() => { copyBtn.textContent = "Copy Invite Link"; }, 1800);
     }).catch(() => {
-      // Fallback: select URL bar
-      const url = window.location.href;
+      // Fallback for browsers that block clipboard API without HTTPS
       const ta = document.createElement("textarea");
-      ta.value = url;
+      ta.value = inviteUrl;
       ta.style.cssText = "position:fixed;top:-9999px;left:-9999px";
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
       ta.remove();
       copyBtn.textContent = "Copied!";
-      setTimeout(() => { copyBtn.textContent = "Copy Link"; }, 1800);
+      setTimeout(() => { copyBtn.textContent = "Copy Invite Link"; }, 1800);
     });
-  });
+  }
+
+  copyBtn.addEventListener("click", doCopy);
+
+  // Show the invite URL below the header so players can see / share it manually
+  const inviteUrlEl = document.createElement("div");
+  inviteUrlEl.className = "nd-lobby-invite-url";
+  inviteUrlEl.textContent = inviteUrl;
 
   header.appendChild(roomNameEl);
   header.appendChild(copyBtn);
@@ -305,6 +325,7 @@ export function mountLobby(
   actionsEl.appendChild(startBtn);
 
   panel.appendChild(header);
+  panel.appendChild(inviteUrlEl);
   panel.appendChild(trackInfoEl);
   panel.appendChild(playersSection);
   panel.appendChild(actionsEl);
