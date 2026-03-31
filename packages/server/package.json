@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "tsc",
+    "build": "tsc && cp -r src/migrations dist/",
     "start": "node dist/main.js",
     "test": "vitest run"
   },
