@@ -264,11 +264,14 @@ async function showLobbyWithSession(
   unmountCurrent();
 
   // Fetch room info from server using the slug
+  // Note: the GET /api/rooms/:slug response does not include a `players` array
+  // (it only has playerCount), so we type it as optional and fall back to []
+  // below. The actual player list arrives via the first room_state WS message.
   let roomInfo: {
     roomId: string;
     trackId: string;
     hostPlayerId: string;
-    players: LobbyState["players"];
+    players?: LobbyState["players"];
   };
 
   try {
@@ -280,7 +283,7 @@ async function showLobbyWithSession(
       roomId: string;
       trackId: string;
       hostPlayerId: string;
-      players: LobbyState["players"];
+      players?: LobbyState["players"];
     };
   } catch (err) {
     console.error("[main] failed to fetch room info:", err);
@@ -312,7 +315,10 @@ async function showLobbyWithSession(
     sessionToken: session.sessionToken,
     playerId: session.playerId,
     hostPlayerId: roomInfo.hostPlayerId,
-    players: roomInfo.players,
+    // The GET /api/rooms/:slug endpoint does not return a players list.
+    // Start with an empty array; the first room_state message over the WebSocket
+    // will populate it before any user interaction.
+    players: roomInfo.players ?? [],
     myReady: false,
   };
 
