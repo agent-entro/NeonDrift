@@ -150,9 +150,12 @@ export function updateCarPhysics(
   }
 
   // 15. Wall collision
+  // Position push + lateral rebound were already here; adding forward-speed
+  // penalty so the car doesn't just plow through walls at full throttle.
   if (wallPush !== null) {
     newX += wallPush.x;
     newZ += wallPush.z;
+    speed *= 0.55; // absorb ~45% of kinetic energy on impact
     if (wallNewLateralVel !== undefined) {
       lateralVel = wallNewLateralVel;
     }

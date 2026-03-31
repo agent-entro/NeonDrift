@@ -20,10 +20,12 @@ import {
 export type CameraMode = "chase" | "orbit";
 
 // Chase camera tuning constants
-const CHASE_DIST = 12;        // m behind the car
-const CHASE_HEIGHT = 5;       // m above the car centre
-const CHASE_LOOK_AHEAD = 4;   // m ahead of car used as look-at point
-const CHASE_LAG = 7;          // exponential-smoothing rate (higher = snappier)
+// Prev: DIST=12, HEIGHT=5 — too high/far, produced a top-down angle that made
+// the car appear tiny and the view feel disconnected from road level.
+const CHASE_DIST = 7;         // m behind the car (was 12)
+const CHASE_HEIGHT = 2.5;     // m above the car centre (was 5)
+const CHASE_LOOK_AHEAD = 6;   // m ahead of car used as look-at point (was 4)
+const CHASE_LAG = 6;          // exponential-smoothing rate (was 7, slightly more lag)
 
 export class GameCamera {
   private scene: Scene;
@@ -37,7 +39,9 @@ export class GameCamera {
     this.canvas = canvas;
 
     // Chase camera – position updated manually every frame in update()
-    this.chaseCamera = new FreeCamera("chaseCamera", new Vector3(0, 5, -12), scene);
+    // Initial position matches the new CHASE_DIST/HEIGHT constants so the
+    // first frame renders cleanly without a lerp-from-origin artifact.
+    this.chaseCamera = new FreeCamera("chaseCamera", new Vector3(0, CHASE_HEIGHT, -CHASE_DIST), scene);
     this.chaseCamera.minZ = 0.1;
     this.chaseCamera.maxZ = 2000;
 
