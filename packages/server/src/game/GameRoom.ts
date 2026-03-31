@@ -11,9 +11,13 @@ import {
   TICK_RATE,
   MAX_PLAYERS,
   MIN_PLAYERS,
-  RECONNECT_GRACE_MS,
+  RECONNECT_GRACE_MS as RECONNECT_GRACE_MS_DEFAULT,
   LOBBY_AUTO_START_MS,
 } from "@neondrift/shared";
+
+/** Operator-tunable reconnect grace period via env var; falls back to shared default (10s) */
+const RECONNECT_GRACE_MS =
+  parseInt(process.env["RECONNECT_GRACE_MS"] ?? "", 10) || RECONNECT_GRACE_MS_DEFAULT;
 import { stepServerPhysics, type ServerCarState } from "./ServerCarPhysics.js";
 import { createPlayerSession, type PlayerSession } from "./PlayerSession.js";
 
