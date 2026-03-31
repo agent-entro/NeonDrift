@@ -218,17 +218,19 @@ export class CarController {
     bodyMat.emissiveColor = new Color3(0, 0.8, 1.0);
     bodyMat.specularColor = new Color3(0.2, 0.4, 0.5);
 
-    // Body: 4×0.9×2m
-    this.bodyMesh = MeshBuilder.CreateBox("carBody", { width: 4, height: 0.9, depth: 2 }, scene);
+    // Body: 2×0.9×4m — 2m wide, 4m long along the Z travel axis.
+    // Previous dimensions were width:4 depth:2, making the car wider than long
+    // and causing it to appear to drive sideways.
+    this.bodyMesh = MeshBuilder.CreateBox("carBody", { width: 2, height: 0.9, depth: 4 }, scene);
     this.bodyMesh.position.y = 0.45;
     this.bodyMesh.material = bodyMat;
     this.bodyMesh.parent = this.rootNode;
 
-    // Cabin: 2.5×0.7×1.4m
+    // Cabin: 1.4×0.7×2.5m — proportional to the corrected body.
     const cabinMat = new StandardMaterial("carCabinMat", scene);
     cabinMat.diffuseColor = new Color3(0, 0.2, 0.3);
     cabinMat.emissiveColor = new Color3(0, 0.6, 0.8);
-    this.cabinMesh = MeshBuilder.CreateBox("carCabin", { width: 2.5, height: 0.7, depth: 1.4 }, scene);
+    this.cabinMesh = MeshBuilder.CreateBox("carCabin", { width: 1.4, height: 0.7, depth: 2.5 }, scene);
     this.cabinMesh.position.y = 1.25;
     this.cabinMesh.material = cabinMat;
     this.cabinMesh.parent = this.rootNode;
@@ -239,11 +241,14 @@ export class CarController {
     wheelMat.emissiveColor = new Color3(0, 0.1, 0.3);
     wheelMat.specularColor = new Color3(0.1, 0.1, 0.15);
 
+    // Wheel positions updated to match the new body proportions:
+    // X=±1.1 → slightly outside the 2m-wide body (realistic overhang)
+    // Z=±1.5 → 3m wheelbase inside the 4m body depth
     const wheelPositions: [number, number, number][] = [
-      [1.8, 0.4, 0.8],   // front right
-      [-1.8, 0.4, 0.8],  // front left
-      [1.8, 0.4, -0.8],  // rear right
-      [-1.8, 0.4, -0.8], // rear left
+      [1.1, 0.4, 1.5],   // front right
+      [-1.1, 0.4, 1.5],  // front left
+      [1.1, 0.4, -1.5],  // rear right
+      [-1.1, 0.4, -1.5], // rear left
     ];
 
     for (let i = 0; i < 4; i++) {
@@ -298,21 +303,33 @@ export class CarController {
     // Get ground height
     const groundY = this.track.getGroundY(curPos.x, curPos.z);
 
-    // Get wall response
-    const wallResp = this.track.getWallResponse(curPos, this.state.lateralVel);
-    const wallPush = wallResp ? { x: wallResp.push.x, z: wallResp.push.z } : null;
-    const wallLateralVel = wallResp ? wallResp.newLateralVel : undefined;
-
-    // Update physics
+    // Step 1: Run physics with no wall constraint — get the "free" new position.
+    // Wall correction is applied AFTER so it operates on the real landing spot,
+    // not a pre-physics estimate. At high speed the old approach could push the
+    // car in the wrong direction because position had already moved significantly.
     const newState = updateCarPhysics(
       this.state,
       effectiveInput,
       dt,
       this.config,
       groundY,
-      wallPush,
-      wallLateralVel,
+      null,   // no wall push here
     );
+
+    // Step 2: Wall correction on post-physics position.
+    const postPhysPos = new Vector3(newState.pos.x, newState.pos.y, newState.pos.z);
+    const wallResp = this.track.getWallResponse(postPhysPos, newState.lateralVel);
+    if (wallResp) {
+      newState.pos.x += wallResp.push.x;
+      newState.pos.z += wallResp.push.z;
+      newState.lateralVel = wallResp.newLateralVel;
+      // Bleed forward speed proportional to penetration depth so a hard wall
+      // hit feels like a real impact rather than a silent slide correction.
+      const penetration = wallResp.push.length();
+      if (penetration > 0.3) {
+        newState.speed *= Math.max(0.5, 1 - penetration * 0.25);
+      }
+    }
 
     // Off-track detection
     const newPos = new Vector3(newState.pos.x, newState.pos.y, newState.pos.z);
@@ -335,10 +352,16 @@ export class CarController {
     this.rootNode.position.z = this.state.pos.z;
     this.rootNode.rotation.y = this.state.yaw;
 
-    // Animate wheels: rotate around axle based on speed
+    // Animate wheels: rotate around the rolling (X) axis.
+    // Each wheel has rotation.z = π/2 which tilts the cylinder into wheel
+    // orientation (height → X-axis). With Babylon.js YXZ euler order the
+    // matrix is Rz(π/2)·Rx(δ)·Ry(0), so incrementing rotation.x spins the
+    // wheel around its axle — the only axis that looks like a rolling wheel.
+    // The old rotation.y produced a top-spin (spinning around world Y before
+    // the tilt is applied), which looked broken at any viewing angle.
     const wheelRotSpeed = this.state.speed * dt * 2;
     for (const wheel of this.wheelMeshes) {
-      wheel.rotation.y += wheelRotSpeed;
+      wheel.rotation.x += wheelRotSpeed;
     }
   }
 
