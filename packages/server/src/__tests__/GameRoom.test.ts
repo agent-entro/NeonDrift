@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GameRoom, type RoomPhase } from "../game/GameRoom.js";
 import { pack, unpack } from "msgpackr";
 import type { ServerMessage } from "@neondrift/shared";
+import { TICK_MS, RENDERED_TRACK_WAYPOINT_COUNT } from "@neondrift/shared";
 
 // ─── Mock WebSocket ───────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ describe("GameRoom", () => {
     room.cleanup();
   });
 
-  it("room transitions to finished when all players finish (time-based laps)", () => {
+  it("room transitions to finished when all players complete 3 laps (position-based)", () => {
     const room = createRoom();
     const ws1 = makeMockWs();
     const ws2 = makeMockWs();
@@ -196,16 +197,41 @@ describe("GameRoom", () => {
     room.setReady("p1", true);
     room.setReady("p2", true);
 
-    // Start race
+    // Start race (3s countdown + 1s buffer)
     vi.advanceTimersByTime(4000);
     expect(room.getPhase()).toBe("racing");
 
-    // Advance 3 full laps (3 * 60 seconds = 180 seconds + a bit more to trigger final check)
-    vi.advanceTimersByTime(181 * 1000);
+    const sessions = room.getPlayersForTest();
+    const p1 = sessions.get("p1")!;
+    const p2 = sessions.get("p2")!;
+
+    const nearEnd = Math.floor(RENDERED_TRACK_WAYPOINT_COUNT * 0.9); // 25
+
+    // Simulate 3 lap completions per player.
+    // Each lap needs: prevWaypointIdx in "near-end" zone AND current position
+    // in "near-start" zone (car starts at z=0, which maps to waypoint 0).
+    // hasLeftStart must be true; it gets reset after each lap so we re-set it
+    // before each subsequent crossing.
+    for (let lap = 0; lap < 3; lap++) {
+      // Prime the near-end condition
+      p1.prevWaypointIdx = nearEnd;
+      p1.waypointIdx     = nearEnd;
+      p1.hasLeftStart    = true;
+      p2.prevWaypointIdx = nearEnd;
+      p2.waypointIdx     = nearEnd;
+      p2.hasLeftStart    = true;
+
+      // Cars are still near waypoint 0 (spawn z≈0 with zero throttle input).
+      // One tick is enough to fire checkLaps with wasNearEnd=true, isNearStart=true.
+      vi.advanceTimersByTime(TICK_MS);
+    }
+
+    // One extra tick to let checkRaceFinish see both finished=true
+    vi.advanceTimersByTime(TICK_MS);
 
     expect(room.getPhase()).toBe("finished");
 
-    // Should have sent race_finish message
+    // Should have broadcast race_finish
     const finishMsgs = ws1.messagesOfType("race_finish");
     expect(finishMsgs.length).toBeGreaterThan(0);
   });

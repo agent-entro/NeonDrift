@@ -14,6 +14,8 @@ import {
   MIN_PLAYERS,
   RECONNECT_GRACE_MS as RECONNECT_GRACE_MS_DEFAULT,
   LOBBY_AUTO_START_MS,
+  computeNearestWaypointIdx,
+  RENDERED_TRACK_WAYPOINT_COUNT,
 } from "@neondrift/shared";
 
 /** Operator-tunable reconnect grace period via env var; falls back to shared default (10s) */
@@ -51,10 +53,8 @@ interface PlayerBaseline {
   lap: number;
 }
 
-/** Number of laps per race (time-based placeholder) */
+/** Number of laps per race */
 const TOTAL_LAPS = 3;
-/** Duration of each lap in ms (placeholder, 60s per lap) */
-const LAP_DURATION_MS = 60_000;
 /** How long after finishing before the room is cleaned up */
 const FINISH_CLEANUP_DELAY_MS = 30_000;
 /** Countdown duration in seconds */
@@ -234,6 +234,14 @@ export class GameRoom {
     return this.players.size;
   }
 
+  /**
+   * Exposes the player session map for unit-test assertions only.
+   * Do not use this in application code.
+   */
+  getPlayersForTest(): Map<string, PlayerSession> {
+    return this.players;
+  }
+
   cleanup(): void {
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
@@ -335,11 +343,17 @@ export class GameRoom {
     this.deltaBaselines.clear();
     this.baselineTick = 0;
 
-    // Initialize lap start times for all players
+    // Initialize lap tracking state for all players
     for (const session of this.players.values()) {
       if (!session.isSpectator) {
         session.lapStartTime = this.raceStartTime;
         session.lap = 0;
+        session.lapTimes = [];
+        session.finished = false;
+        session.finishTimeMs = null;
+        session.waypointIdx = 0;
+        session.prevWaypointIdx = 0;
+        session.hasLeftStart = false;
       }
     }
 
@@ -398,58 +412,77 @@ export class GameRoom {
     this.checkRaceFinish(now);
   }
 
+  /**
+   * Position-based lap detection — mirrors the client-side LapTimer logic.
+   *
+   * Each physics tick we compute the player's nearest track waypoint (0–27).
+   * A lap completes when the car transitions from the "near-end" zone (idx ≥ 90%
+   * of total) to the "near-start" zone (idx < 10% of total), provided the car
+   * has already driven far enough past the start line to exclude the initial
+   * crossing (hasLeftStart flag).
+   *
+   * This replaces the broken time-based system where all players advanced laps
+   * simultaneously, making race positions permanently tied.
+   */
   private checkLaps(session: PlayerSession, now: number): void {
     if (session.finished) return;
 
-    const elapsed = now - this.raceStartTime;
-    const expectedLap = Math.floor(elapsed / LAP_DURATION_MS);
-    const completedLaps = Math.min(expectedLap, TOTAL_LAPS);
+    const total = RENDERED_TRACK_WAYPOINT_COUNT; // 28
+    const idx = computeNearestWaypointIdx(session.carState.x, session.carState.z);
 
-    if (completedLaps > session.lap) {
-      // Player completed one or more laps
-      while (session.lap < completedLaps && session.lap < TOTAL_LAPS) {
-        const lapTime = now - session.lapStartTime;
-        session.lapTimes.push(lapTime);
-        session.lapStartTime = now;
-        session.lap++;
+    // Mark as having left the start zone (>15% of the track away from start)
+    if (!session.hasLeftStart && idx > Math.floor(total * 0.15)) {
+      session.hasLeftStart = true;
+    }
+
+    // Detect wrap-around: was near the end of the track, now near the beginning
+    const wasNearEnd = session.prevWaypointIdx >= Math.floor(total * 0.9);
+    const isNearStart = idx < Math.floor(total * 0.1);
+
+    if (wasNearEnd && isNearStart && session.hasLeftStart) {
+      const lapTime = now - session.lapStartTime;
+      session.lapTimes.push(lapTime);
+      session.lapStartTime = now;
+      session.lap++;
+      session.hasLeftStart = false; // require leaving start zone again next lap
+
+      this.broadcast({
+        type: "event",
+        kind: "lap_complete",
+        player_id: session.playerId,
+        data: {
+          lap: session.lap,
+          lap_time_ms: lapTime,
+        },
+      });
+
+      console.log(
+        `[room:${this.roomId}] player ${session.playerId} completed lap ${session.lap}`,
+      );
+
+      if (session.lap >= TOTAL_LAPS) {
+        session.finished = true;
+        session.finishTimeMs = now - this.raceStartTime;
+        this.finishOrder.push(session.playerId);
 
         this.broadcast({
           type: "event",
-          kind: "lap_complete",
+          kind: "player_finish",
           player_id: session.playerId,
           data: {
-            lap: session.lap,
-            lap_time_ms: lapTime,
+            position: this.finishOrder.length,
+            total_time_ms: session.finishTimeMs,
           },
         });
 
         console.log(
-          `[room:${this.roomId}] player ${session.playerId} completed lap ${session.lap}`,
+          `[room:${this.roomId}] player ${session.playerId} finished in position ${this.finishOrder.length}`,
         );
-
-        // Check if finished (completed all laps)
-        if (session.lap >= TOTAL_LAPS) {
-          session.finished = true;
-          session.finishTimeMs = now - this.raceStartTime;
-          this.finishOrder.push(session.playerId);
-
-          this.broadcast({
-            type: "event",
-            kind: "player_finish",
-            player_id: session.playerId,
-            data: {
-              position: this.finishOrder.length,
-              total_time_ms: session.finishTimeMs,
-            },
-          });
-
-          console.log(
-            `[room:${this.roomId}] player ${session.playerId} finished in position ${this.finishOrder.length}`,
-          );
-          break;
-        }
       }
     }
+
+    session.prevWaypointIdx = session.waypointIdx;
+    session.waypointIdx = idx;
   }
 
   private checkReconnectTimeouts(now: number): void {
@@ -547,7 +580,14 @@ export class GameRoom {
         finish_time_ms: session.finishTimeMs,
       };
 
-      if (isFullSync || !baseline || session.finished) {
+      // lapChanged must trigger a full-snapshot, NOT a delta: PlayerPositionDelta
+      // has no lap field, so a delta-only tick would silently drop the new lap
+      // count and leave both clients showing stale (and equal) lap numbers until
+      // the next scheduled full-sync 3 seconds later — the root cause of the
+      // "both cars think they are in 1st" desync.
+      const lapChanged = baseline ? fullState.lap !== baseline.lap : false;
+
+      if (isFullSync || !baseline || session.finished || lapChanged) {
         // Full snapshot: include complete state and update baseline
         fullPlayers.push(fullState);
         this.deltaBaselines.set(session.playerId, {
@@ -571,9 +611,8 @@ export class GameRoom {
           Math.abs(dy) > DELTA_POS_THRESHOLD ||
           Math.abs(dz) > DELTA_POS_THRESHOLD;
         const yawChanged = Math.abs(dyaw) > DELTA_YAW_THRESHOLD;
-        const lapChanged = fullState.lap !== baseline.lap;
 
-        if (posMoved || yawChanged || lapChanged || fullState.powerup !== null) {
+        if (posMoved || yawChanged || fullState.powerup !== null) {
           // Quantize to int16 (clamped)
           const clamp16 = (v: number): number =>
             Math.round(Math.max(INT16_MIN, Math.min(INT16_MAX, v)));

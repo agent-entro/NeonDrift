@@ -33,6 +33,7 @@ import type {
   PlayerGameState,
   StateMessage,
 } from "@neondrift/shared";
+import { computeRaceScore } from "@neondrift/shared";
 import type { NetClient } from "./NetClient.js";
 import type { CarPhysicsInput } from "../engine/car.js";
 import type { Minimap } from "../engine/Minimap.js";
@@ -235,20 +236,30 @@ export class RaceNetwork {
   }
 
   /**
-   * Returns the local player's race position (1 = first) computed from
-   * server-authoritative lap counts. Ties (same lap) are unbroken — all
-   * players on the same lap share the same position number.
+   * Returns the local player's race position (1 = first) using a composite
+   * score of server-authoritative lap count + intra-lap track progress.
+   *
+   * Score = lap × WAYPOINT_COUNT + nearestWaypointIdx(x, z)
+   *
+   * This eliminates the "both cars show 1st" bug that occurred because the old
+   * implementation used lap count alone — all players always shared the same lap
+   * in the time-based system, so everyone was permanently tied.
+   *
+   * Position is computed from server-authoritative state in latestStates.  On
+   * full-sync ticks the lap field is updated immediately; on delta ticks the
+   * position (x,z) is updated from the delta, so the intra-lap tiebreaker is
+   * always live.
    */
   getLocalRacePosition(): number {
     const localState = this.latestStates.get(this.localPlayerId);
     if (!localState) return 1;
 
-    const localLap = localState.lap;
+    const localScore = computeRaceScore(localState.lap, localState.pos.x, localState.pos.z);
     let aheadCount = 0;
     for (const state of this.latestStates.values()) {
-      if (state.id !== this.localPlayerId && state.lap > localLap) {
-        aheadCount++;
-      }
+      if (state.id === this.localPlayerId) continue;
+      const score = computeRaceScore(state.lap, state.pos.x, state.pos.z);
+      if (score > localScore) aheadCount++;
     }
     return aheadCount + 1;
   }

@@ -10,7 +10,7 @@ export interface PlayerSession {
   disconnectedAt: number | null;
   isSpectator: boolean;
   carState: ServerCarState;
-  /** Current lap (0-indexed: 0 = haven't started first lap yet) */
+  /** Current lap (0-indexed: 0 = first lap in progress) */
   lap: number;
   lapStartTime: number;
   /** Completed lap times in ms */
@@ -22,6 +22,14 @@ export interface PlayerSession {
   lastInput: ServerCarInput;
   lastInputTick: number;
   isReady: boolean;
+  // ── Position-based lap detection ─────────────────────────────────────────────
+  /** Nearest track waypoint index this tick (0–RENDERED_TRACK_WAYPOINT_COUNT-1) */
+  waypointIdx: number;
+  /** Nearest track waypoint index last tick — needed to detect the wrap-around */
+  prevWaypointIdx: number;
+  /** True once the player has driven past the start zone so we don't count the
+   *  initial start-line crossing as a lap completion. */
+  hasLeftStart: boolean;
 }
 
 const ZERO_INPUT: ServerCarInput = {
@@ -72,5 +80,8 @@ export function createPlayerSession(
     lastInput: { ...ZERO_INPUT },
     lastInputTick: 0,
     isReady: false,
+    waypointIdx: 0,
+    prevWaypointIdx: 0,
+    hasLeftStart: false,
   };
 }
