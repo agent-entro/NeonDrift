@@ -683,11 +683,11 @@ neondrift/
 - [x] Room lifecycle: lobby → countdown → racing → finished → cleanup
 
 **Milestone 1.3 — Rooms, Matchmaking & Lobby**
-- [ ] Landing page with 3D hero, [CREATE ROOM] and [QUICK PLAY] flows
-- [ ] Room creation and join APIs with slug generation and session tokens
-- [ ] Lobby UI: player list, ready toggle, host controls, copy-link button
-- [ ] In-memory matchmaking queue with ELO brackets and region bucketing
-- [ ] Spectator mode (read-only WS connection, camera follows leader)
+- [x] Landing page with 3D hero, [CREATE ROOM] and [QUICK PLAY] flows
+- [x] Room creation and join APIs with slug generation and session tokens
+- [x] Lobby UI: player list, ready toggle, host controls, copy-link button
+- [x] In-memory matchmaking queue with ELO brackets and region bucketing
+- [x] Spectator mode (read-only WS connection, camera follows leader)
 
 **Milestone 1.4 — Power-ups, Polish & Replay**
 - [ ] 5 power-ups: Speed Boost, Shield, EMP Pulse, Gravity Well, Time Warp (server-authoritative)

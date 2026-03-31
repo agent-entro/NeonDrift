@@ -8,6 +8,8 @@ import { initDb } from "./db/client.js";
 import { runMigrations } from "./db/migrate.js";
 import { RoomManager } from "./game/RoomManager.js";
 import { setupWsHandler } from "./game/WsHandler.js";
+import { roomsRouter } from "./routes/rooms.js";
+import { matchmakingRouter } from "./routes/matchmaking.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -24,7 +26,27 @@ const roomManager = new RoomManager();
 
 // ─── HTTP app ─────────────────────────────────────────────────────────────────
 const app = new Hono();
+
+// CORS middleware for all /api/* routes
+app.use("/api/*", async (c, next) => {
+  await next();
+  c.header("Access-Control-Allow-Origin", "*");
+  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+});
+
+// Handle CORS preflight for all /api/* routes
+app.options("/api/*", (c) => {
+  c.header("Access-Control-Allow-Origin", "*");
+  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  return c.body(null, 204);
+});
+
+// Health check
 app.get("/health", (c) => c.json({ ok: true, ts: Date.now() }));
+
+// GET /api/rooms — list active rooms
 app.get("/api/rooms", (c) => {
   const rooms = roomManager.getActiveRooms().map((r) => ({
     roomId: r.roomId,
@@ -34,17 +56,19 @@ app.get("/api/rooms", (c) => {
   }));
   return c.json({ rooms });
 });
-app.post("/api/rooms", (c) => c.json({ error: "not_implemented" }, 501));
-app.get("/api/rooms/:slug", (c) => c.json({ error: "not_implemented" }, 501));
-app.post("/api/rooms/:slug/join", (c) => c.json({ error: "not_implemented" }, 501));
-app.post("/api/matchmaking/join", (c) => c.json({ error: "not_implemented" }, 501));
-app.delete("/api/matchmaking", (c) => c.json({ ok: true }));
 
-// Test room creation endpoint
+// Mount room and matchmaking routers
+const rooms = roomsRouter(roomManager, db);
+const matchmaking = matchmakingRouter(roomManager, db);
+
+app.route("/", rooms);
+app.route("/", matchmaking);
+
+// Test room creation endpoint (kept for backwards compatibility)
 app.post("/api/rooms/create-test", async (c) => {
   const { nanoid } = await import("nanoid");
   const roomId = nanoid(10);
-  const room = roomManager.createRoom(roomId, "city-canyon", "test-host", 8);
+  const room = roomManager.createRoom(roomId, "track_city_canyon", "test-host", 8);
   return c.json({ roomId, wsUrl: `/ws?roomId=${roomId}` });
 });
 
@@ -75,7 +99,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
 
 // ─── WebSocket server ─────────────────────────────────────────────────────────
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
-setupWsHandler(wss, roomManager);
+setupWsHandler(wss, roomManager, db);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 httpServer.listen(PORT, () => {

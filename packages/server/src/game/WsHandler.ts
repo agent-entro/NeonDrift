@@ -2,10 +2,11 @@ import { WebSocket, WebSocketServer } from "ws";
 import { unpack, pack } from "msgpackr";
 import type { ClientMessage, JoinMessage } from "@neondrift/shared";
 import type { RoomManager } from "./RoomManager.js";
+import type Database from "better-sqlite3";
+import { validateSession as dbValidateSession } from "./SessionManager.js";
 
 /**
- * Simple in-memory session store.
- * In a real app this would validate against a DB.
+ * Simple in-memory session store for test tokens.
  * Maps session_token -> playerId.
  */
 const sessionStore = new Map<string, { playerId: string; displayName: string }>();
@@ -22,18 +23,30 @@ export function registerSession(
 }
 
 /**
- * Validate a session token.
+ * Validate a session token against DB and in-memory store.
  * Returns player info or null if invalid.
  */
 function validateSession(
+  db: Database.Database,
   token: string,
 ): { playerId: string; displayName: string } | null {
-  // For test rooms, accept any token and use a derived playerId
+  // For test tokens, accept any token and use a derived playerId
   if (token.startsWith("test-")) {
     const playerId = token.replace("test-", "player-");
     return { playerId, displayName: `Player-${playerId.slice(-4)}` };
   }
-  return sessionStore.get(token) ?? null;
+
+  // Check in-memory store first (legacy / test registrations)
+  const inMemory = sessionStore.get(token);
+  if (inMemory) return inMemory;
+
+  // Fall back to DB lookup
+  const dbSession = dbValidateSession(db, token);
+  if (dbSession) {
+    return { playerId: dbSession.playerId, displayName: dbSession.displayName };
+  }
+
+  return null;
 }
 
 /** Per-connection state before the player has joined a room */
@@ -43,7 +56,11 @@ interface PendingConnection {
   playerId: string | null;
 }
 
-export function setupWsHandler(wss: WebSocketServer, roomManager: RoomManager): void {
+export function setupWsHandler(
+  wss: WebSocketServer,
+  roomManager: RoomManager,
+  db: Database.Database,
+): void {
   wss.on("connection", (ws: WebSocket) => {
     const conn: PendingConnection = {
       ws,
@@ -76,7 +93,7 @@ export function setupWsHandler(wss: WebSocketServer, roomManager: RoomManager): 
           sendError(ws, "not_in_room", "Send a join message first");
           return;
         }
-        handleJoin(ws, conn, msg as JoinMessage, roomManager);
+        handleJoin(ws, conn, msg as JoinMessage, roomManager, db);
         return;
       }
 
@@ -110,9 +127,10 @@ function handleJoin(
   conn: PendingConnection,
   msg: JoinMessage,
   roomManager: RoomManager,
+  db: Database.Database,
 ): void {
   // Validate session
-  const sessionInfo = validateSession(msg.session_token);
+  const sessionInfo = validateSession(db, msg.session_token);
   if (!sessionInfo) {
     sendError(ws, "unauthorized", "Invalid session token");
     return;
