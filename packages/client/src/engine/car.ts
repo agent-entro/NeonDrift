@@ -21,7 +21,7 @@ export const BOOST_DURATION = 2000;    // ms
 export const ACCELERATION = 20;        // m/s²
 export const BRAKE_DECEL = 30;         // m/s²
 export const NATURAL_DECEL = 8;        // m/s² (no throttle)
-export const MAX_STEER_ANGLE = 1.2;    // radians/s yaw rate at full speed
+export const MAX_STEER_ANGLE = 1.6;    // radians/s yaw rate at full speed
 export const DRIFT_FACTOR = 0.85;      // how much lateral velocity persists per second
 export const LATERAL_FRICTION = 0.6;  // friction coefficient for drift alignment
 export const GRAVITY = 18;             // m/s² (slightly exaggerated for arcade feel)
@@ -115,8 +115,11 @@ export function updateCarPhysics(
     speed = Math.max(0, speed - config.naturalDecel * dt);
   }
 
-  // 7. Yaw rate scaled by speed
-  yaw += input.steer * config.maxSteerAngle * (speed / config.topSpeed) * dt;
+  // 7. Yaw rate — ramp to full authority at 30% of top speed so the car
+  // steers responsively at city speeds without needing to be floored.
+  // At speed=0 the factor is still 0 (can't spin in place).
+  const steerFactor = Math.min(1, speed / (config.topSpeed * 0.3));
+  yaw += input.steer * config.maxSteerAngle * steerFactor * dt;
 
   // 8. Drift: lateral slip builds with throttle + steering
   lateralVel += input.steer * speed * 0.15 * dt;
@@ -271,8 +274,10 @@ export class CarController {
     }
 
     // Position root node at spawn
+    // BJS left-hand: rotation.y = +yaw aligns the mesh with physics heading
+    // (yaw=0 → facing +Z; yaw=π/2 → facing +X — same convention as sin/cos).
     this.rootNode.position = new Vector3(spawn.x, spawn.y, spawn.z);
-    this.rootNode.rotation.y = -this.state.yaw;
+    this.rootNode.rotation.y = this.state.yaw;
   }
 
   update(dt: number, input: CarPhysicsInput): void {
@@ -355,7 +360,7 @@ export class CarController {
     this.rootNode.position.x = this.state.pos.x;
     this.rootNode.position.y = this.state.pos.y;
     this.rootNode.position.z = this.state.pos.z;
-    this.rootNode.rotation.y = -this.state.yaw;
+    this.rootNode.rotation.y = this.state.yaw;
 
     // Animate wheels: rotate around the rolling (X) axis.
     // Each wheel has rotation.z = π/2 which tilts the cylinder into wheel
@@ -397,7 +402,7 @@ export class CarController {
     };
     this._boostEnergy = 1.0;
     this.rootNode.position = new Vector3(spawn.x, spawn.y, spawn.z);
-    this.rootNode.rotation.y = -this.state.yaw;
+    this.rootNode.rotation.y = this.state.yaw;
   }
 
   activateBoost(): void {
