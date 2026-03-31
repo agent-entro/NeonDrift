@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  base: "/neon/",
+  base: "/neon",
   server: {
     allowedHosts: ["agent.br-ndt.dev"],
     port: 5174,
