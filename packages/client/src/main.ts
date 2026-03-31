@@ -342,6 +342,7 @@ async function showLobbyWithSession(
           sceneResult.scene,
           netClient,
           session.playerId,
+          sceneResult.minimap,
         );
         sceneResult.registerNetworkTick((input, tick) => {
           raceNet.tick(input, tick);

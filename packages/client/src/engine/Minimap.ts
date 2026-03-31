@@ -10,6 +10,8 @@ export class Minimap {
   private _container: HTMLDivElement;
   private _svg: SVGSVGElement;
   private _carDot: SVGCircleElement;
+  /** SVG dots for remote players; grown/shrunk dynamically as players join/leave */
+  private _ghostDots: SVGCircleElement[] = [];
 
   // Bounding box for projection (with padding)
   private _minX: number = 0;
@@ -106,10 +108,42 @@ export class Minimap {
     return [svgX, svgY];
   }
 
-  update(carPos: Vector3, _otherCars?: Vector3[]): void {
+  update(carPos: Vector3): void {
     const [cx, cy] = this._project(carPos.x, carPos.z);
     this._carDot.setAttribute("cx", String(cx));
     this._carDot.setAttribute("cy", String(cy));
+  }
+
+  /**
+   * Update remote-player dots on the minimap.
+   * Called each frame by RaceNetwork with the interpolated ghost positions.
+   * Grows/shrinks the pool of SVG circles as players join or leave.
+   */
+  updateRemoteCars(positions: { x: number; z: number }[]): void {
+    const svgNS = "http://www.w3.org/2000/svg";
+
+    // Add missing dots
+    while (this._ghostDots.length < positions.length) {
+      const dot = document.createElementNS(svgNS, "circle") as SVGCircleElement;
+      dot.setAttribute("r", "3");
+      dot.setAttribute("fill", "#ff00aa");  // magenta = remote player
+      // Insert before the local car dot so it renders underneath
+      this._svg.insertBefore(dot, this._carDot);
+      this._ghostDots.push(dot);
+    }
+
+    // Remove excess dots (players who left)
+    while (this._ghostDots.length > positions.length) {
+      const dot = this._ghostDots.pop()!;
+      this._svg.removeChild(dot);
+    }
+
+    // Update all dot positions
+    for (let i = 0; i < positions.length; i++) {
+      const [sx, sy] = this._project(positions[i].x, positions[i].z);
+      this._ghostDots[i].setAttribute("cx", String(sx));
+      this._ghostDots[i].setAttribute("cy", String(sy));
+    }
   }
 
   mount(container: HTMLElement): void {
