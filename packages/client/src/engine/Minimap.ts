@@ -100,8 +100,9 @@ export class Minimap {
   /** Project world (x, z) to SVG (svgX, svgY) */
   private _project(x: number, z: number): [number, number] {
     const svgX = ((x - this._minX) / this._rangeX) * this._size;
-    // Z increases away from camera; flip vertically for top-down look
-    const svgY = ((z - this._minZ) / this._rangeZ) * this._size;
+    // SVG Y=0 is top; Babylon +Z is forward (away from camera = "north").
+    // Flip so +Z maps to top of minimap, matching the main view orientation.
+    const svgY = this._size - ((z - this._minZ) / this._rangeZ) * this._size;
     return [svgX, svgY];
   }
 
