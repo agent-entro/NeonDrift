@@ -674,13 +674,13 @@ neondrift/
 - [x] HUD overlay: speed, lap counter, boost meter, minimap
 - [x] Lap timing, start/finish line detection, race completion (3 laps → results screen)
 
-**Milestone 1.2 — Multiplayer Netcode ✓ COMPLETE**
-- [x] WebSocket game protocol (MessagePack binary frames)
-- [x] Server-authoritative game loop at 20Hz with delta-compressed state broadcast
-- [x] Client-side prediction + smooth reconciliation
-- [x] Interpolation for remote players
-- [x] Reconnection with configurable grace period (`RECONNECT_GRACE_MS`)
-- [x] Room lifecycle: lobby → countdown → racing → finished → cleanup
+**Milestone 1.2 — Multiplayer Netcode**
+- [ ] WebSocket game protocol (MessagePack binary frames)
+- [ ] Server-authoritative game loop at 20Hz with delta-compressed state broadcast
+- [ ] Client-side prediction + smooth reconciliation
+- [ ] Interpolation for remote players
+- [ ] Reconnection with configurable grace period (`RECONNECT_GRACE_MS`)
+- [ ] Room lifecycle: lobby → countdown → racing → finished → cleanup
 
 **Milestone 1.3 — Rooms, Matchmaking & Lobby**
 - [ ] Landing page with 3D hero, [CREATE ROOM] and [QUICK PLAY] flows
