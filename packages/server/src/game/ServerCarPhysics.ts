@@ -1,16 +1,21 @@
 /**
  * Server-side car physics — pure functions, no Babylon.js.
  * Constants MUST match packages/client/src/engine/car.ts exactly.
+ *
+ * SYNC CONTRACT: Every constant and formula in this file must be byte-for-byte
+ * equivalent to the corresponding logic in client/src/engine/car.ts.
+ * Any divergence causes the server to broadcast wrong positions, which all
+ * remote clients display as ghost cars at impossible locations.
  */
 
-// ─── Physics constants (mirrored from client/src/engine/car.ts) ───────────────
-const TOP_SPEED = 35;           // m/s
+// ─── Physics constants (MUST match client/src/engine/car.ts) ──────────────────
+const TOP_SPEED = 35;           // m/s  — matches client
 const BOOST_MULTIPLIER = 1.5;
 const BOOST_DURATION = 2000;    // ms
 const ACCELERATION = 20;        // m/s²
 const BRAKE_DECEL = 30;         // m/s²
 const NATURAL_DECEL = 8;        // m/s²
-const MAX_STEER_ANGLE = 1.2;    // radians/s yaw rate
+const MAX_STEER_ANGLE = 1.6;    // rad/s — MUST match client (was 1.2: caused 2.7× turning divergence)
 const LATERAL_FRICTION = 0.6;   // friction coefficient
 const GRAVITY = 18;             // m/s²
 const GROUND_Y = 0.5;           // world ground height
@@ -77,8 +82,12 @@ export function stepServerPhysics(
     speed = Math.max(0, speed - NATURAL_DECEL * dt);
   }
 
-  // 7. Yaw rate scaled by speed
-  yaw += input.steering * MAX_STEER_ANGLE * (speed / TOP_SPEED) * dt;
+  // 7. Yaw rate — ramp to full authority at 30% of top speed.
+  // MUST match client car.ts: Math.min(1, speed / (TOP_SPEED * 0.3))
+  // The old linear formula (speed / TOP_SPEED) gave only 0.5× factor at cruise
+  // while the client reached 1.0× — a 2× divergence in turning rate every tick.
+  const steerFactor = Math.min(1, speed / (TOP_SPEED * 0.3));
+  yaw += input.steering * MAX_STEER_ANGLE * steerFactor * dt;
 
   // 8. Drift: lateral slip builds with throttle + steering
   lateralVel += input.steering * speed * 0.15 * dt;

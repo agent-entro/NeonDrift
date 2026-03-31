@@ -439,4 +439,43 @@ export class CarController {
   get mesh(): TransformNode {
     return this.rootNode;
   }
+
+  /**
+   * Blend the car's physics state toward a server-authoritative snapshot.
+   *
+   * Called once per render frame from main.ts after receiving the server's
+   * latest state for the local player. A gentle blend (alpha≈0.08) corrects
+   * slow drift caused by floating-point divergence and wall-collision timing;
+   * a strong snap (alpha≈0.8) handles large jumps such as respawns.
+   *
+   * @param serverPos   Authoritative world position from the server
+   * @param serverYaw   Authoritative yaw in radians
+   * @param serverSpeed Authoritative forward speed in m/s
+   * @param alpha       Blend factor per frame: 0 = no change, 1 = instant snap
+   */
+  applyServerCorrection(
+    serverPos: { x: number; y: number; z: number },
+    serverYaw: number,
+    serverSpeed: number,
+    alpha: number,
+  ): void {
+    // Lerp position toward server
+    this.state.pos.x += (serverPos.x - this.state.pos.x) * alpha;
+    this.state.pos.y += (serverPos.y - this.state.pos.y) * alpha;
+    this.state.pos.z += (serverPos.z - this.state.pos.z) * alpha;
+
+    // Blend yaw via shortest arc to avoid spinning through ±π discontinuity
+    const TWO_PI = 2 * Math.PI;
+    const yawDiff = ((serverYaw - this.state.yaw) % TWO_PI + TWO_PI + Math.PI) % TWO_PI - Math.PI;
+    this.state.yaw += yawDiff * alpha;
+
+    // Blend speed
+    this.state.speed += (serverSpeed - this.state.speed) * alpha;
+
+    // Keep mesh in sync after correction
+    this.rootNode.position.x = this.state.pos.x;
+    this.rootNode.position.y = this.state.pos.y;
+    this.rootNode.position.z = this.state.pos.z;
+    this.rootNode.rotation.y = this.state.yaw;
+  }
 }

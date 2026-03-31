@@ -208,3 +208,86 @@ export function computeNearestWaypointIdx(x: number, z: number): number {
 export function computeRaceScore(lap: number, x: number, z: number): number {
   return lap * RENDERED_TRACK_WAYPOINT_COUNT + computeNearestWaypointIdx(x, z);
 }
+
+// ─── Server-side wall collision (no Babylon.js) ───────────────────────────────
+// The client computes wall response from a 2000-point Catmull-Rom spline.
+// The server approximates using the same 28 raw control points — the error at
+// sharp corners is small and far better than broadcasting positions inside walls.
+
+/** Road half-width in metres — must match track.ts ROAD_HALF_WIDTH */
+const SERVER_ROAD_HALF_WIDTH = 6;
+/** Distance from road edge at which push-back activates */
+const SERVER_WALL_BUFFER = 1.5;
+
+export interface ServerWallResponse {
+  pushX: number;
+  pushZ: number;
+  newLateralVel: number;
+  penetration: number;
+}
+
+/**
+ * Pure-function wall response for the server physics loop.
+ * Uses RENDERED_TRACK_WAYPOINTS to approximate the track centre-line without
+ * any Babylon.js dependency.
+ *
+ * Algorithm mirrors client/src/engine/track.ts TrackSystem.getWallResponse():
+ *   1. Find nearest waypoint (same as computeNearestWaypointIdx)
+ *   2. Compute track tangent from that waypoint to its successor
+ *   3. Derive the right-pointing normal (perpendicular in XZ)
+ *   4. Compute lateral offset; if outside (halfWidth - BUFFER), push back
+ */
+export function computeServerWallResponse(
+  x: number,
+  z: number,
+  lateralVel: number,
+): ServerWallResponse | null {
+  // Find nearest waypoint index
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  const n = RENDERED_TRACK_WAYPOINTS.length;
+  for (let i = 0; i < n; i++) {
+    const wp = RENDERED_TRACK_WAYPOINTS[i];
+    const dx = x - wp.x;
+    const dz = z - wp.z;
+    const d = dx * dx + dz * dz;
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i;
+    }
+  }
+
+  // Track tangent: direction from nearest waypoint to its successor
+  const cur = RENDERED_TRACK_WAYPOINTS[bestIdx];
+  const nxt = RENDERED_TRACK_WAYPOINTS[(bestIdx + 1) % n];
+  const txRaw = nxt.x - cur.x;
+  const tzRaw = nxt.z - cur.z;
+  const tLen = Math.sqrt(txRaw * txRaw + tzRaw * tzRaw);
+  if (tLen < 1e-6) return null; // degenerate segment, skip
+  const tx = txRaw / tLen;
+  const tz = tzRaw / tLen;
+
+  // Right-pointing normal (tangent rotated 90° clockwise in XZ):
+  // If tangent = (tx, tz), then right-normal = (tz, -tx)
+  const nx = tz;
+  const nz = -tx;
+
+  // Lateral offset of car from track centre (positive = right side)
+  const dpx = x - cur.x;
+  const dpz = z - cur.z;
+  const lateral = dpx * nx + dpz * nz;
+  const absLateral = Math.abs(lateral);
+
+  if (absLateral > SERVER_ROAD_HALF_WIDTH - SERVER_WALL_BUFFER) {
+    const side = lateral > 0 ? 1 : -1;
+    const penetration = absLateral - (SERVER_ROAD_HALF_WIDTH - SERVER_WALL_BUFFER) + 0.1;
+    return {
+      pushX: -side * penetration * nx,
+      pushZ: -side * penetration * nz,
+      newLateralVel: -lateralVel * 0.3,
+      penetration,
+    };
+  }
+
+  return null;
+}

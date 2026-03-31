@@ -16,6 +16,7 @@ import {
   LOBBY_AUTO_START_MS,
   computeNearestWaypointIdx,
   RENDERED_TRACK_WAYPOINT_COUNT,
+  computeServerWallResponse,
 } from "@neondrift/shared";
 
 /** Operator-tunable reconnect grace period via env var; falls back to shared default (10s) */
@@ -193,8 +194,12 @@ export class GameRoom {
     if (this.phase === "lobby") {
       this.sendRoomState(ws);
     } else {
-      // Send current race state so the client can re-sync
+      // Send room state (player list) then immediately follow with a full
+      // position snapshot so the reconnecting client gets fresh baselines for
+      // all players right away instead of waiting up to FULL_SYNC_INTERVAL
+      // ticks (3 s at 20 Hz) for the next scheduled full sync.
       this.sendRoomState(ws);
+      this.sendCurrentRaceState(ws);
     }
   }
 
@@ -399,7 +404,37 @@ export class GameRoom {
         session.carState = stepServerPhysics(session.carState, session.lastInput, TICK_MS);
       }
 
-      // 6. Check time-based lap completion
+      // ── Authoritative wall collision ─────────────────────────────────────
+      // Mirror of the two-step pattern in client/src/engine/car.ts:
+      //   Step 1 = stepServerPhysics (unconstrained movement)
+      //   Step 2 = wall push-back applied to result
+      //
+      // Without this the server broadcasts positions inside walls. The local
+      // driver's client-side prediction keeps them outside (via its own wall
+      // check), but every OTHER client displays the ghost inside the wall —
+      // the classic "ghost clips through wall" desync.
+      const wallResp = computeServerWallResponse(
+        session.carState.x,
+        session.carState.z,
+        session.carState.lateralVel,
+      );
+      if (wallResp !== null) {
+        const s = session.carState;
+        // Bleed speed proportional to penetration depth — same formula as
+        // client car.ts (penetration > 0.3 guard + max(0.5, ...) clamp).
+        const newSpeed = wallResp.penetration > 0.3
+          ? s.speed * Math.max(0.5, 1 - wallResp.penetration * 0.25)
+          : s.speed;
+        session.carState = {
+          ...s,
+          x: s.x + wallResp.pushX,
+          z: s.z + wallResp.pushZ,
+          lateralVel: wallResp.newLateralVel,
+          speed: newSpeed,
+        };
+      }
+
+      // 6. Check position-based lap completion
       this.checkLaps(session, now);
     }
 
@@ -551,6 +586,54 @@ export class GameRoom {
   private calcXp(position: number): number {
     const bonuses: Record<number, number> = { 1: 100, 2: 70, 3: 50 };
     return 50 + (bonuses[position] ?? 20);
+  }
+
+  /**
+   * Send a one-off full-snapshot state message to a single WebSocket.
+   * Called when a player connects or reconnects during an active race so they
+   * immediately get baselines for every current player rather than waiting up
+   * to FULL_SYNC_INTERVAL ticks (3 s at 20 Hz) for the next scheduled broadcast.
+   */
+  private sendCurrentRaceState(ws: WebSocket): void {
+    if (this.phase !== "racing") return;
+
+    const fullPlayers: PlayerGameState[] = [];
+
+    for (const session of this.players.values()) {
+      if (session.isSpectator) continue;
+
+      const state = session.carState;
+      fullPlayers.push({
+        id: session.playerId,
+        pos: { x: state.x, y: state.y, z: state.z },
+        rot: yawToQuat(state.yaw),
+        vel: this.computeVelFromState(state),
+        lap: session.lap,
+        powerup: session.activePowerup,
+        finished: session.finished,
+        finish_time_ms: session.finishTimeMs,
+      });
+    }
+
+    if (fullPlayers.length === 0) return;
+
+    const msg: ServerMessage = {
+      type: "state",
+      tick: this.tick,
+      server_time: Date.now(),
+      players: fullPlayers,
+      deltas: [],
+      powerups: [],
+      is_full_sync: true,
+      baseline_tick: this.tick,
+    };
+
+    console.log(
+      `[room:${this.roomId}] sending catch-up full state to reconnecting client: ` +
+      `${fullPlayers.length} players at tick ${this.tick}`,
+    );
+
+    this.send(ws, msg);
   }
 
   private broadcastState(now: number): void {

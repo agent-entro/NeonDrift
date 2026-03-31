@@ -63,13 +63,18 @@ export class RaceNetwork {
    * Exponentially-smoothed server-clock offset (ms).
    * Approximates: serverClockMs = Date.now() + serverTimeOffset
    *
-   * Raw per-message samples are noisy (RTT jitter), so we use an EMA with a
-   * slow alpha=0.05 to produce a stable offset. The first sample seeds the filter
-   * directly to avoid a long ramp-up delay.
+   * Uses a two-phase EMA:
+   *   Samples 0–9:  α = 0.5 (fast initial convergence; reaches 99% in ~7 samples = 350 ms)
+   *   Samples 10+:  α = 0.05 (slow thereafter to resist jitter)
+   *
+   * The first sample still seeds directly to avoid the cold-start delay where
+   * the entire initial 3-second window has wildly wrong render timestamps.
    */
   private serverTimeOffset = 0;
   private serverTimeOffsetInitialized = false;
-  private static readonly CLOCK_EMA_ALPHA = 0.05;
+  private clockSyncSamples = 0;
+  private static readonly CLOCK_EMA_ALPHA_FAST = 0.5;   // first 10 samples
+  private static readonly CLOCK_EMA_ALPHA_SLOW = 0.05;  // steady state
 
   private _lastServerTick = 0;
 
@@ -92,16 +97,23 @@ export class RaceNetwork {
     this._lastServerTick = stateMsg.tick;
 
     // -- Clock synchronisation -------------------------------------------
-    // EMA smoothing prevents a single high-latency packet from shifting the
-    // render time and causing a visible jump in all ghost positions.
+    // rawOffset = server_time (when server sent) - Date.now() (when we received).
+    // On a symmetric link this ≈ -(RTT/2).  EMA smoothing prevents a single
+    // high-latency packet from snapping all ghost render positions.
     const rawOffset = stateMsg.server_time - Date.now();
     if (!this.serverTimeOffsetInitialized) {
+      // Seed directly from the first packet — avoids a long ramp-up where
+      // render timestamps are far off and ghosts extrapolate from the future.
       this.serverTimeOffset = rawOffset;
       this.serverTimeOffsetInitialized = true;
     } else {
-      const alpha = RaceNetwork.CLOCK_EMA_ALPHA;
+      // Two-phase EMA: fast convergence for the first 10 samples, then settle.
+      const alpha = this.clockSyncSamples < 10
+        ? RaceNetwork.CLOCK_EMA_ALPHA_FAST
+        : RaceNetwork.CLOCK_EMA_ALPHA_SLOW;
       this.serverTimeOffset = this.serverTimeOffset + alpha * (rawOffset - this.serverTimeOffset);
     }
+    this.clockSyncSamples++;
 
     // -- Full snapshots ---------------------------------------------------
     // stateMsg.players is non-empty only on full-sync ticks.
@@ -262,6 +274,17 @@ export class RaceNetwork {
       if (score > localScore) aheadCount++;
     }
     return aheadCount + 1;
+  }
+
+  /**
+   * Returns the server's most recent authoritative state for the local player,
+   * or null if no state has been received yet.
+   *
+   * Used by main.ts to apply server reconciliation to the local CarController
+   * (gently blending predicted position toward server truth each frame).
+   */
+  getLocalPlayerState(): import("@neondrift/shared").PlayerGameState | null {
+    return this.latestStates.get(this.localPlayerId) ?? null;
   }
 
   dispose(): void {

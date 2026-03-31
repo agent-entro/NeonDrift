@@ -386,6 +386,33 @@ async function showLobbyWithSession(
         sceneResult.registerNetworkTick((input, tick) => {
           raceNet.tick(input, tick);
 
+          // ── Server reconciliation for local player ─────────────────────────
+          // The server is the authoritative source of truth. We blend the local
+          // car's predicted position toward the server's calculated position to
+          // correct accumulated physics drift (wall collision timing, float
+          // rounding) without making the car feel laggy.
+          //
+          // Thresholds:
+          //   < 0.3 m  → no correction (within noise, avoids micro-jitter)
+          //   0.3–10 m → gentle blend (alpha 0.08, ~60 frames to converge)
+          //   > 10 m   → strong snap (alpha 0.7, handles respawns)
+          const srvState = raceNet.getLocalPlayerState();
+          if (srvState && sceneResult) {
+            const car = sceneResult.car;
+            const dx = srvState.pos.x - car.position.x;
+            const dz = srvState.pos.z - car.position.z;
+            const divergence = Math.sqrt(dx * dx + dz * dz);
+
+            if (divergence > 0.3) {
+              const srvYaw = 2 * Math.atan2(srvState.rot.y, srvState.rot.w);
+              const srvSpeed = Math.sqrt(
+                srvState.vel.x * srvState.vel.x + srvState.vel.z * srvState.vel.z,
+              );
+              const alpha = divergence > 10 ? 0.7 : 0.08;
+              car.applyServerCorrection(srvState.pos, srvYaw, srvSpeed, alpha);
+            }
+          }
+
           // Update race position display using server-authoritative lap data
           if (racePositionEl) {
             const pos = raceNet.getLocalRacePosition();
@@ -395,14 +422,33 @@ async function showLobbyWithSession(
           // Update debug overlay (only paid when visible)
           if (debugVisible) {
             const d = raceNet.getDebugInfo();
+            const car = sceneResult?.car;
+            const srvSt = raceNet.getLocalPlayerState();
+
+            // Divergence between current prediction and server truth
+            let divText = "—";
+            if (car && srvSt) {
+              const ddx = srvSt.pos.x - car.position.x;
+              const ddz = srvSt.pos.z - car.position.z;
+              divText = `${Math.sqrt(ddx * ddx + ddz * ddz).toFixed(2)} m`;
+            }
+
+            // RTT estimate: server offset ≈ -(RTT/2) when clocks are synced
+            const rttEst = Math.round(-d.serverTimeOffset * 2);
+            const bufHealth = d.bufferSize >= 3 ? "OK" : d.bufferSize >= 1 ? "LOW" : "EMPTY";
+
             debugOverlay.textContent = [
-              `SERVER TICK   ${d.latestServerTick}`,
-              `CLIENT NOW    ${Date.now()}`,
-              `RENDER TIME   ${d.renderTime}`,
-              `SRV OFFSET    ${d.serverTimeOffset > 0 ? "+" : ""}${d.serverTimeOffset} ms`,
-              `PLAYERS       ${d.trackedPlayers}`,
-              `BUFFER        ${d.bufferSize} snaps`,
-              `F3 — hide debug`,
+              `── NeonDrift Debug (F3) ──`,
+              `Server tick   ${d.latestServerTick}`,
+              `Srv offset    ${d.serverTimeOffset >= 0 ? "+" : ""}${d.serverTimeOffset} ms`,
+              `RTT est.      ~${rttEst} ms`,
+              `Render@       ${d.renderTime}`,
+              `Players       ${d.trackedPlayers}`,
+              `Buffer        ${d.bufferSize} snaps [${bufHealth}]`,
+              `──────────────────────────`,
+              `Srv diverge   ${divText}`,
+              `──────────────────────────`,
+              `F3 — hide`,
             ].join("\n");
           }
         });
