@@ -48,7 +48,9 @@ export function roomsRouter(roomManager: RoomManager, db: Database.Database): Ho
       return c.json({ error: "invalid_json" }, 400);
     }
 
-    const displayName = body.displayName ?? "Anonymous";
+    // Clamp displayName to satisfy the players table CHECK (length BETWEEN 3 AND 20)
+    const rawName = typeof body.displayName === "string" ? body.displayName.trim() : "";
+    const displayName = rawName.length === 0 ? "Anonymous" : rawName.slice(0, 20).padEnd(3, "_");
     const trackId = resolveTrackId(body.trackId);
     const privacy = body.privacy === "invite" ? "invite" : "public";
     const maxPlayers = Math.min(8, Math.max(2, Number(body.maxPlayers) || 8));
