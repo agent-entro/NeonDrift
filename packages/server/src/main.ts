@@ -74,18 +74,28 @@ app.post("/api/rooms/create-test", async (c) => {
 
 // ─── HTTP server ──────────────────────────────────────────────────────────────
 const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  const url = `http://localhost${req.url ?? "/"}`;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
-  const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
-
-  const honoReq = new Request(url, {
-    method: req.method ?? "GET",
-    headers: req.headers as Record<string, string>,
-    body: body?.length ? body : undefined,
-  });
-
   try {
+    const url = `http://localhost${req.url ?? "/"}`;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+
+    // Flatten array-valued headers — Node.js http module can give string[]
+    // for set-cookie etc.; fetch Headers constructor requires string values.
+    const flatHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (v !== undefined) flatHeaders[k] = Array.isArray(v) ? v.join(", ") : v;
+    }
+
+    // Node 18+ requires duplex:'half' when a body is present on a Request.
+    const honoReq = new Request(url, {
+      method: req.method ?? "GET",
+      headers: flatHeaders,
+      body: body?.length ? body : undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(body?.length ? { duplex: "half" } as any : {}),
+    });
+
     const honoRes = await app.fetch(honoReq);
     const resBody = await honoRes.arrayBuffer();
     res.writeHead(honoRes.status, Object.fromEntries(honoRes.headers.entries()));
