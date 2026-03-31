@@ -751,9 +751,9 @@ Server → Client:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Arcade physics don't feel fun | Medium | Critical | Budget 2 extra days for tuning. Playtest with 5+ non-developers before Phase 1A signoff. Reference Mario Kart 8 / Burnout drift feel. |
+| Arcade physics don't feel fun | Medium | Critical | Budget 2 extra days for tuning. Playtest with 5+ non-developers before Milestone 1.1 signoff. Reference Mario Kart 8 / Burnout drift feel. |
 | WebGPU not available on target mobile devices | Medium | High | Babylon.js falls back to WebGL 2 automatically. Test fallback path explicitly on Android Chrome and Samsung Internet. |
-| 20Hz tick rate too expensive at 8 players × 30 rooms | Low | High | Profile early (Phase 1B). Fallback: reduce to 15Hz (still acceptable for arcade racing). Optimize: skip ticks for distant players. |
+| 20Hz tick rate too expensive at 8 players × 30 rooms | Low | High | Profile early (Milestone 1.2). Fallback: reduce to 15Hz (still acceptable for arcade racing). Optimize: skip ticks for distant players. |
 | SQLite single-writer bottleneck under load | Low | Medium | WAL mode handles concurrent reads. Writes are low-frequency (room create, race results). If bottleneck appears, batch writes with 100ms debounce. |
 | Mid-range Android phones can't maintain 30fps | Medium | High | Aggressive LOD, texture downscaling, disable post-processing on low-end. Detect GPU tier at startup via `renderer` string from WebGL context. |
 | Replay files too large for R2 free tier | Low | Low | 50KB/replay × 1000 races/day = 50MB/day. R2 free tier is 10GB. 200 days before concern. |
