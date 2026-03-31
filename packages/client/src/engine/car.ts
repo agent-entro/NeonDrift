@@ -214,6 +214,8 @@ export class CarController {
     };
 
     this.rootNode = new TransformNode("car", scene);
+    // Scale the car down so it looks appropriately small relative to the 12m-wide track
+    this.rootNode.scaling = new Vector3(0.4, 0.4, 0.4);
 
     // Build car meshes
     const bodyMat = new StandardMaterial("carBodyMat", scene);
