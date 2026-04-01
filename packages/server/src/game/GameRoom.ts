@@ -19,6 +19,9 @@ import {
   computeServerWallResponse,
   getTerrainGroundY,
 } from "@neondrift/shared";
+import type Database from "better-sqlite3";
+import { nanoid } from "nanoid";
+import { ReplayRecorder } from "./ReplayRecorder.js";
 
 /** Operator-tunable reconnect grace period via env var; falls back to shared default (10s) */
 const RECONNECT_GRACE_MS =
@@ -90,6 +93,10 @@ export class GameRoom {
   private deltaBaselines: Map<string, PlayerBaseline> = new Map();
   /** Tick number of last full sync */
   private baselineTick: number = 0;
+  /** Optional DB reference for persisting race history */
+  private db: Database.Database | null;
+  /** Replay recorder for this race */
+  private replayRecorder: ReplayRecorder | null = null;
 
   constructor(
     roomId: string,
@@ -97,6 +104,7 @@ export class GameRoom {
     hostPlayerId: string,
     maxPlayers: number,
     onEmpty: () => void,
+    db?: Database.Database,
   ) {
     this.roomId = roomId;
     this.trackId = trackId;
@@ -104,6 +112,7 @@ export class GameRoom {
     this.maxPlayers = Math.min(maxPlayers, MAX_PLAYERS);
     this.onEmpty = onEmpty;
     this.raceId = `race-${roomId}-${Date.now()}`;
+    this.db = db ?? null;
   }
 
   // ─── Public API ──────────────────────────────────────────────────────────────
@@ -363,6 +372,28 @@ export class GameRoom {
       }
     }
 
+    // Persist race record to DB
+    if (this.db) {
+      try {
+        const startedAt = new Date(this.raceStartTime)
+          .toISOString()
+          .replace("T", " ")
+          .replace(/\.\d{3}Z$/, "");
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO races (id, room_id, track_id, status, started_at)
+             VALUES (?, ?, ?, 'active', ?)`,
+          )
+          .run(this.raceId, this.roomId, this.trackId, startedAt);
+      } catch (err) {
+        console.error(`[room:${this.roomId}] failed to insert race row:`, err);
+      }
+    }
+
+    // Start replay recorder
+    this.replayRecorder = new ReplayRecorder(this.raceId);
+    this.replayRecorder.start();
+
     this.broadcast({
       type: "race_start",
       race_id: this.raceId,
@@ -446,6 +477,31 @@ export class GameRoom {
 
     // 3. Broadcast state
     this.broadcastState(now);
+
+    // 4. Record replay frame
+    if (this.replayRecorder) {
+      const framePlayers: PlayerGameState[] = [];
+      for (const session of this.players.values()) {
+        if (session.isSpectator) continue;
+        const state = session.carState;
+        framePlayers.push({
+          id: session.playerId,
+          pos: { x: state.x, y: state.y, z: state.z },
+          rot: { x: 0, y: Math.sin(state.yaw / 2), z: 0, w: Math.cos(state.yaw / 2) },
+          vel: this.computeVelFromState(state),
+          lap: session.lap,
+          powerup: session.activePowerup,
+          finished: session.finished,
+          finish_time_ms: session.finishTimeMs,
+        });
+      }
+      this.replayRecorder.recordTick({
+        tick: this.tick,
+        server_time: now,
+        players: framePlayers,
+        powerups: [],
+      });
+    }
 
     this.tick++;
 
@@ -582,11 +638,73 @@ export class GameRoom {
       results,
     });
 
+    // Persist results + finalize replay
+    this.persistRaceFinish(results, now);
+
     // Schedule cleanup
     setTimeout(() => {
       this.cleanup();
       this.onEmpty();
     }, FINISH_CLEANUP_DELAY_MS);
+  }
+
+  /** Write final race row + per-player results to DB; finalize replay file. */
+  private persistRaceFinish(
+    results: Array<{
+      player_id: string;
+      display_name: string;
+      position: number;
+      total_time_ms: number;
+      best_lap_ms: number;
+      xp_earned: number;
+    }>,
+    finishedAt: number,
+  ): void {
+    // Finalize replay first so we have the key before writing DB row
+    let replayKey: string | null = null;
+    if (this.replayRecorder) {
+      replayKey = this.replayRecorder.finish();
+      this.replayRecorder = null;
+    }
+
+    if (!this.db) return;
+
+    const finishedAtStr = new Date(finishedAt)
+      .toISOString()
+      .replace("T", " ")
+      .replace(/\.\d{3}Z$/, "");
+
+    try {
+      this.db
+        .prepare(
+          `UPDATE races
+              SET status = 'finished', finished_at = ?, replay_key = ?
+            WHERE id = ?`,
+        )
+        .run(finishedAtStr, replayKey, this.raceId);
+
+      const insertResult = this.db.prepare(
+        `INSERT OR IGNORE INTO race_results
+           (id, race_id, player_id, position, total_time_ms, best_lap_ms, xp_earned, powerups_used)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+      );
+
+      for (const r of results) {
+        insertResult.run(
+          nanoid(16),
+          this.raceId,
+          r.player_id,
+          r.position,
+          r.total_time_ms,
+          r.best_lap_ms,
+          r.xp_earned,
+        );
+      }
+
+      console.log(`[room:${this.roomId}] race ${this.raceId} persisted (${results.length} results)`);
+    } catch (err) {
+      console.error(`[room:${this.roomId}] failed to persist race finish:`, err);
+    }
   }
 
   private calcXp(position: number): number {

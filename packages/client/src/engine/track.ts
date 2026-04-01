@@ -40,11 +40,16 @@ const RAW_WAYPOINTS: [number, number, number][] = [
   [0, 0, -40],   // chicane
   [-8, 0, -25],
   [5, 0, -12],
-  [0, 0, 0],     // close loop (same as first)
+  // NOTE: no duplicate [0,0,0] here — Curve3 closed=true handles loop closure.
+  // Duplicating the start point creates a degenerate zero-length segment at the
+  // seam, causing normalize() to return NaN and blowing up wall vertices there.
 ];
 
 const ROAD_HALF_WIDTH = 6;   // 12m total road width
 const WALL_HEIGHT = 8;
+// Sink wall bottoms this far below the road edge to prevent gaps showing
+// through at elevation transitions or floating-point seam mismatches.
+const WALL_SINK = 1.0;
 
 export interface TrackSegment {
   center: Vector3;
@@ -130,19 +135,36 @@ export class TrackSystem {
     const curr = pts[i];
     const next = pts[(i + 1) % n];
 
-    // Outgoing normal (same as the old per-point formula)
-    const tOut = next.subtract(curr).normalize();
-    const nOut = new Vector3(tOut.z, 0, -tOut.x);
+    // Outgoing direction / normal (XZ plane only — walls are always vertical).
+    const dOut = next.subtract(curr);
+    const dIn  = curr.subtract(prev);
 
-    // Incoming normal
-    const tIn = curr.subtract(prev).normalize();
-    const nIn = new Vector3(tIn.z, 0, -tIn.x);
+    // Guard: if a segment is degenerate (zero-length), fall back to outgoing or
+    // incoming direction so normalize() never produces NaN.
+    const outLen = Math.sqrt(dOut.x * dOut.x + dOut.z * dOut.z);
+    const inLen  = Math.sqrt(dIn.x  * dIn.x  + dIn.z  * dIn.z);
+
+    const tOut = outLen > 1e-6
+      ? new Vector3(dOut.x / outLen, 0, dOut.z / outLen)
+      : (inLen > 1e-6 ? new Vector3(dIn.x / inLen, 0, dIn.z / inLen) : new Vector3(0, 0, 1));
+
+    const tIn = inLen > 1e-6
+      ? new Vector3(dIn.x / inLen, 0, dIn.z / inLen)
+      : tOut;
+
+    // Right-pointing perpendiculars (rotate tangent 90° CW in XZ)
+    const nOut = new Vector3(tOut.z, 0, -tOut.x);
+    const nIn  = new Vector3(tIn.z,  0, -tIn.x);
 
     // Miter direction: average of both normals, re-normalised
-    const miter = nIn.add(nOut).normalize();
+    const miterRaw = nIn.add(nOut);
+    const miterLen = Math.sqrt(miterRaw.x * miterRaw.x + miterRaw.z * miterRaw.z);
+    const miter = miterLen > 1e-6
+      ? new Vector3(miterRaw.x / miterLen, 0, miterRaw.z / miterLen)
+      : nOut; // fallback for exactly-180° reversal (shouldn't happen on this track)
 
     // Scale = 1 / cos(half-angle).  dot(miter, nOut) == cos(half-angle).
-    // Clamp denominator to avoid division-by-zero on near-180° turns.
+    // Clamp denominator to avoid excessive stretch on tight turns.
     const cosHalf = Vector3.Dot(miter, nOut);
     const scale = Math.min(1.0 / Math.max(cosHalf, 1.0 / MAX_MITER), MAX_MITER);
 
@@ -166,9 +188,11 @@ export class TrackSystem {
       sideOrientation: Mesh.DOUBLESIDE,
     }, this.scene);
 
+    // Dark asphalt floor — kept very dark so the lighter concrete walls read
+    // clearly against it.
     const roadMat = new StandardMaterial("roadMat", this.scene);
-    roadMat.diffuseColor = new Color3(0.06, 0.06, 0.12);
-    roadMat.specularColor = new Color3(0.1, 0.1, 0.2);
+    roadMat.diffuseColor  = new Color3(0.04, 0.04, 0.09); // near-black blue-tinted
+    roadMat.specularColor = new Color3(0.08, 0.08, 0.18);
     road.material = roadMat;
     road.receiveShadows = true;
   }
@@ -185,15 +209,21 @@ export class TrackSystem {
       const lEdge = pts[i].subtract(miterRight.scale(ROAD_HALF_WIDTH));
       const rEdge = pts[i].add(miterRight.scale(ROAD_HALF_WIDTH));
 
-      leftBottom.push(lEdge);
+      // Sink the wall bottom below the road surface so no gap ever shows
+      // through at elevation transitions.
+      leftBottom.push(new Vector3(lEdge.x, lEdge.y - WALL_SINK, lEdge.z));
       leftTop.push(new Vector3(lEdge.x, lEdge.y + WALL_HEIGHT, lEdge.z));
-      rightBottom.push(rEdge);
+      rightBottom.push(new Vector3(rEdge.x, rEdge.y - WALL_SINK, rEdge.z));
       rightTop.push(new Vector3(rEdge.x, rEdge.y + WALL_HEIGHT, rEdge.z));
     }
 
+    // Concrete-like wall: significantly brighter than the dark road floor so
+    // the boundary is clearly legible.  A faint blue-tinted emissive gives it
+    // a slight glow under the neon lighting without looking out of place.
     const wallMat = new StandardMaterial("wallMat", this.scene);
-    wallMat.diffuseColor = new Color3(0.08, 0.08, 0.1);
-    wallMat.specularColor = new Color3(0.05, 0.05, 0.08);
+    wallMat.diffuseColor  = new Color3(0.28, 0.26, 0.34); // medium concrete-violet
+    wallMat.specularColor = new Color3(0.15, 0.15, 0.25); // sharper highlight
+    wallMat.emissiveColor = new Color3(0.03, 0.03, 0.06); // very faint ambient glow
 
     const leftWall = MeshBuilder.CreateRibbon("leftWall", {
       pathArray: [leftBottom, leftTop],
