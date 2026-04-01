@@ -109,17 +109,54 @@ export class TrackSystem {
     this._buildStartLine(this._splinePoints[0], this._splinePoints[1]);
   }
 
+  /**
+   * Compute the miter-adjusted right-pointing vector at spline point i.
+   *
+   * Using only the outgoing tangent at each vertex causes the ribbon edges to
+   * "jump" across sharp corners, making the inside of the turn clip through
+   * the outside face (the "road closes" artifact).  The fix is a standard
+   * miter join: blend the incoming and outgoing edge normals and scale by
+   * 1/cos(half-angle) so the wall edge stays exactly ROAD_HALF_WIDTH from
+   * the centreline when measured perpendicular to the road surface.
+   *
+   * The scale is capped at MAX_MITER to prevent extreme stretch on turns
+   * that approach 180° (hairpins).
+   */
+  private _miterRight(pts: Vector3[], i: number): Vector3 {
+    const MAX_MITER = 3.0; // caps at ~70° full-angle turn
+    const n = pts.length;
+
+    const prev = pts[(i - 1 + n) % n];
+    const curr = pts[i];
+    const next = pts[(i + 1) % n];
+
+    // Outgoing normal (same as the old per-point formula)
+    const tOut = next.subtract(curr).normalize();
+    const nOut = new Vector3(tOut.z, 0, -tOut.x);
+
+    // Incoming normal
+    const tIn = curr.subtract(prev).normalize();
+    const nIn = new Vector3(tIn.z, 0, -tIn.x);
+
+    // Miter direction: average of both normals, re-normalised
+    const miter = nIn.add(nOut).normalize();
+
+    // Scale = 1 / cos(half-angle).  dot(miter, nOut) == cos(half-angle).
+    // Clamp denominator to avoid division-by-zero on near-180° turns.
+    const cosHalf = Vector3.Dot(miter, nOut);
+    const scale = Math.min(1.0 / Math.max(cosHalf, 1.0 / MAX_MITER), MAX_MITER);
+
+    return miter.scale(scale);
+  }
+
   private _buildRoad(pts: Vector3[]): void {
     const leftPath: Vector3[] = [];
     const rightPath: Vector3[] = [];
 
     for (let i = 0; i < pts.length; i++) {
-      const next = pts[(i + 1) % pts.length];
-      const tangent = next.subtract(pts[i]).normalize();
-      const right = new Vector3(tangent.z, 0, -tangent.x).normalize();
-
-      leftPath.push(pts[i].subtract(right.scale(ROAD_HALF_WIDTH)));
-      rightPath.push(pts[i].add(right.scale(ROAD_HALF_WIDTH)));
+      const miterRight = this._miterRight(pts, i);
+      leftPath.push(pts[i].subtract(miterRight.scale(ROAD_HALF_WIDTH)));
+      rightPath.push(pts[i].add(miterRight.scale(ROAD_HALF_WIDTH)));
     }
 
     const road = MeshBuilder.CreateRibbon("road", {
@@ -143,12 +180,10 @@ export class TrackSystem {
     const rightTop: Vector3[] = [];
 
     for (let i = 0; i < pts.length; i++) {
-      const next = pts[(i + 1) % pts.length];
-      const tangent = next.subtract(pts[i]).normalize();
-      const right = new Vector3(tangent.z, 0, -tangent.x).normalize();
+      const miterRight = this._miterRight(pts, i);
 
-      const lEdge = pts[i].subtract(right.scale(ROAD_HALF_WIDTH));
-      const rEdge = pts[i].add(right.scale(ROAD_HALF_WIDTH));
+      const lEdge = pts[i].subtract(miterRight.scale(ROAD_HALF_WIDTH));
+      const rEdge = pts[i].add(miterRight.scale(ROAD_HALF_WIDTH));
 
       leftBottom.push(lEdge);
       leftTop.push(new Vector3(lEdge.x, lEdge.y + WALL_HEIGHT, lEdge.z));
