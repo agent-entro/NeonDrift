@@ -1,8 +1,15 @@
 import { GameRoom } from "./GameRoom.js";
 import { MAX_ROOMS } from "@neondrift/shared";
+import type Database from "better-sqlite3";
 
 export class RoomManager {
   private rooms: Map<string, GameRoom> = new Map();
+  private db: Database.Database | null = null;
+
+  /** Attach a DB instance so new rooms can persist race history. */
+  setDb(db: Database.Database): void {
+    this.db = db;
+  }
 
   createRoom(
     roomId: string,
@@ -20,7 +27,7 @@ export class RoomManager {
 
     const room = new GameRoom(roomId, trackId, hostPlayerId, maxPlayers, () => {
       this.removeRoom(roomId);
-    });
+    }, this.db ?? undefined);
 
     this.rooms.set(roomId, room);
     console.log(`[RoomManager] created room ${roomId} (track: ${trackId})`);

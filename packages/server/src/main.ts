@@ -11,6 +11,7 @@ import { setupWsHandler } from "./game/WsHandler.js";
 import { roomsRouter } from "./routes/rooms.js";
 import { matchmakingRouter } from "./routes/matchmaking.js";
 import { replaysRouter } from "./routes/replays.js";
+import { historyRouter } from "./routes/history.js";
 import { rateLimit } from "./middleware/rateLimit.js";
 import { securityHeaders } from "./middleware/securityHeaders.js";
 
@@ -26,6 +27,7 @@ runMigrations(db, MIGRATIONS_DIR);
 
 // ─── Room manager ─────────────────────────────────────────────────────────────
 const roomManager = new RoomManager();
+roomManager.setDb(db);
 
 // ─── HTTP app ─────────────────────────────────────────────────────────────────
 const app = new Hono();
@@ -88,14 +90,16 @@ app.get("/api/rooms", (c) => {
   return c.json({ rooms });
 });
 
-// Mount room, matchmaking, and replay routers
+// Mount room, matchmaking, replay, and history routers
 const rooms = roomsRouter(roomManager, db);
 const matchmaking = matchmakingRouter(roomManager, db);
 const replays = replaysRouter();
+const history = historyRouter(db);
 
 app.route("/", rooms);
 app.route("/", matchmaking);
 app.route("/", replays);
+app.route("/", history);
 
 // Test room creation endpoint (kept for backwards compatibility)
 app.post("/api/rooms/create-test", async (c) => {
